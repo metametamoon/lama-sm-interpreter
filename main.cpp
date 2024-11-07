@@ -14,7 +14,8 @@ using u32 = uint32_t;
 using i32 = int32_t;
 
 
-#define UNBOXED(x) (((u64)(x)) & 0x0001)
+// #define UNBOXED(x) (((u64)(x)) & 0x0001)
+#define BOXED(x) (((u64)(x)) & 0x0001)
 #define UNBOX(x) (((u64)(x)) >> 1)
 #define BOX(x) ((((u64)(x)) << 1) | 0x0001)
 
@@ -43,6 +44,18 @@ struct stack {
 
   void print_ptrs() {
     fprintf(stderr, "rbp=%lld rsp=%lld\n", base_pointer, stack_pointer);
+  }
+
+  void print_content() {
+    print_ptrs();
+    for (i32 i = stack_pointer; i >= 0; --i ) {
+      fprintf(stderr, "%.2d: ", i);
+      if (BOXED(data[i])) {
+        fprintf(stderr, "B(%llu)\n", UNBOX(data[i]));
+      } else {
+        fprintf(stderr, "%llu\n", data[i]);
+      }
+    }
   }
 };
 
@@ -161,8 +174,8 @@ void interpret(FILE *f, bytefile *bf) {
   auto globals = std::array<u64, 1000>{};
   // auto locals = std::vector<stackframe> {};
   // pseudo first two args
-  operands_stack.push(0);
-  operands_stack.push(0);
+  operands_stack.push(BOX(0));
+  operands_stack.push(BOX(0));
   u64 const GLOBAL = 1;
   u64 const LOCAL =  2;
   u64 const ARG = 3;
@@ -185,7 +198,7 @@ void interpret(FILE *f, bytefile *bf) {
   };
 
   do {
-    operands_stack.print_ptrs();
+    // operands_stack.print_ptrs();
     char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     fprintf(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     // fprintf(stderr, "rbp=%llu\n", operands_stack.base_pointer);
@@ -197,10 +210,10 @@ void interpret(FILE *f, bytefile *bf) {
     case 0:
       fprintf(stderr, "BINOP\t%s", ops[l - 1]);
       if (l - 1 <= ops_array.size()) {
-        u64 t2 = operands_stack.pop();
-        u64 t1 = operands_stack.pop();
+        u64 t2 = UNBOX(operands_stack.pop());
+        u64 t1 = UNBOX(operands_stack.pop());
         u64 result = ops_array[l - 1](t1, t2);
-        operands_stack.push(result);
+        operands_stack.push(BOX(result));
       } else {
         unsupported();
       }
@@ -210,7 +223,7 @@ void interpret(FILE *f, bytefile *bf) {
       switch (l) {
       case 0: {
         auto arg = INT;
-        operands_stack.push(arg);
+        operands_stack.push(BOX(arg));
         fprintf(stderr, "CONST\t%d", arg);
         break;
       }
@@ -235,10 +248,11 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 4: {
         fprintf(stderr, "STA");
-        u64 value = operands_stack.pop();
-        u64 ref = operands_stack.pop();
+        // operands_stack.print_content();
+        u64 value = operands_stack.pop(); // preserve the boxing kind
+        u64 ref = UNBOX(operands_stack.pop());
         write_reference(ref, value);
-        operands_stack.push(value);
+        operands_stack.push(BOX(value));
         break;
       }
 
@@ -252,14 +266,14 @@ void interpret(FILE *f, bytefile *bf) {
       case 6: {
         fprintf(stderr, "END");
         if (operands_stack.base_pointer != 3) {
-          u64 ret_value = operands_stack.pop();
+          u64 ret_value = UNBOX(operands_stack.pop());
           u64 top_n_args = operands_stack.n_args;
           operands_stack.stack_pointer = operands_stack.base_pointer + 1;
-          operands_stack.base_pointer = operands_stack.pop();
-          operands_stack.n_args = operands_stack.pop();
+          operands_stack.base_pointer = UNBOX(operands_stack.pop());
+          operands_stack.n_args = UNBOX(operands_stack.pop());
           u64 ret_ip = operands_stack.pop();
           operands_stack.stack_pointer -= top_n_args;
-          operands_stack.push(ret_value);
+          operands_stack.push(BOX(ret_value));
           ip = (char*) ret_ip;
         } else {
           goto stop;
@@ -318,7 +332,7 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 3) {
           // LDA
-          operands_stack.push(create_reference(n, GLOBAL));
+          operands_stack.push(BOX(create_reference(n, GLOBAL)));
           break;
         }
         unsupported();
@@ -338,7 +352,7 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 3) {
           // LDA
-          operands_stack.push(create_reference(n, LOCAL));
+          operands_stack.push(BOX(create_reference(n, LOCAL)));
           break;
         }
         unsupported();
@@ -360,7 +374,7 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 3) {
           // LDA
-          operands_stack.push(create_reference(n, ARG));
+          operands_stack.push(BOX(create_reference(n, ARG)));
           break;
         }
         unsupported();
@@ -380,7 +394,7 @@ void interpret(FILE *f, bytefile *bf) {
       case 0: {
         auto jump_location = INT;
         fprintf(stderr, "CJMPz\t0x%.8x", jump_location);
-        auto top = operands_stack.pop();
+        auto top = UNBOX(operands_stack.pop());
         if (top == 0) {
           ip = bf->code_ptr + jump_location;
         }
@@ -390,7 +404,7 @@ void interpret(FILE *f, bytefile *bf) {
       case 1: {
         auto jump_location = INT;
         fprintf(stderr, "CJMPnz\t0x%.8x", jump_location);
-        auto top = operands_stack.pop();
+        auto top = UNBOX(operands_stack.pop());
         if (top != 0) {
           ip = bf->code_ptr + jump_location;
         }
@@ -402,8 +416,8 @@ void interpret(FILE *f, bytefile *bf) {
         int n_locals = INT;
         fprintf(stderr, "BEGIN\t%d ", n_args);
         fprintf(stderr, "%d", n_locals);
-        operands_stack.push(operands_stack.n_args);
-        operands_stack.push(operands_stack.base_pointer);
+        operands_stack.push(BOX(operands_stack.n_args));
+        operands_stack.push(BOX(operands_stack.base_pointer));
         operands_stack.n_args = n_args;
         operands_stack.base_pointer = operands_stack.stack_pointer - 1;
         operands_stack.stack_pointer += (n_locals + 1);
@@ -499,16 +513,17 @@ void interpret(FILE *f, bytefile *bf) {
         // printf("> ");
         fflush(stdout);
         scanf("%d", &result);
-        operands_stack.push(result);
+        operands_stack.push(BOX(result));
         break;
       }
 
       case 1: {
-        u64 value = operands_stack.pop();
+        // operands_stack.print_content();
+        u64 value = UNBOX(operands_stack.pop());
         fprintf(stderr, "CALL\tLwrite");
         // fprintf(stdout, "\nout = %d\n", int32_t(value));
-        fprintf(stdout, "%d\n", int32_t(value));
-        operands_stack.push(0);
+        fprintf(stdout, "%d\n", i32(value));
+        operands_stack.push(BOX(0));
         break;
       }
       case 2:
