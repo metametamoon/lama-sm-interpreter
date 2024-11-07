@@ -1,0 +1,34 @@
+CALL addr args:
+    stack.push(ip)
+    ip = addr
+BEGIN nargs nlocals:
+    stack.push(old_nargs)
+    stack.push(old_rbp)
+    set nargs <- nargs
+    set rbp <- rsp
+    set rsp <- rsp + locals
+
+END:
+    ret_value = stack.pop()
+    top_args = stack.args;
+    rsp = rbp;
+    rbp = stack.pop();
+    stack.args = stack.pop();
+    ip = stack.pop();
+    rsp -= top_args;
+    stack.push(ret_value)
+
+
+
+___ <- rsp 
+loc_{N-1}
+..
+loc_2
+loc_1
+loc_0
+old_rbp <- rbp
+old_nargs
+ret_addr
+arg2
+arg1
+arg0
