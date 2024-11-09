@@ -416,101 +416,58 @@ void interpret(FILE *f, bytefile *bf) {
         FAIL;
       }
       break;
-    case 2:
-    case 3:
-    case 4:
+    case 2: { // LD
       fprintf(stderr, "%s\t", lds[h - 2]);
-      switch (l) {
-      case 0: {
-        int n = INT;
-        fprintf(stderr, "G(%d)", n);
-        if (h == 4) {
-          // ST
-          operands_stack.data[operands_stack.stack_begin - 1 - n] =
-              operands_stack.top();
-          break;
-        } else if (h == 2) {
-          // LD
-          operands_stack.push(
-              operands_stack.data[operands_stack.stack_begin - 1 - n]);
-          break;
-        } else if (h == 3) {
-          // LDA
-          auto ref = create_reference(n, GLOBAL);
-          operands_stack.push(ref);
-          operands_stack.push(ref);
-          break;
-        }
-        unsupported();
-        break;
+      i32 index = INT;
+      u32 kind = -1;
+      if (l == 0) {
+        kind = GLOBAL;
+      } else if (l == 1) {
+        kind = LOCAL;
+      } else if (l == 2) {
+        kind = ARG;
+      } else if (l == 3) {
+        kind = CAPTURED;
       }
-      case 1: { // locals
-        int n = INT;
-        fprintf(stderr, "L(%d)", n);
-        if (h == 4) {
-          // ST
-          auto top = operands_stack.top();
-          operands_stack.data[operands_stack.base_pointer + 1 + n] = top;
-          break;
-        } else if (h == 2) {
-          // LD
-          operands_stack.push(
-              operands_stack.data[operands_stack.base_pointer + 1 + n]);
-          break;
-        } else if (h == 3) {
-          // LDA
-          auto ref = BOX(create_reference(n, LOCAL));
-          operands_stack.push(ref);
-          operands_stack.push(ref);
-          break;
-        }
-        unsupported();
-        break;
-      }
-      case 2: { // arg
-        int n = INT;
-        fprintf(stderr, "A(%d)", n);
-        if (h == 4) {
-          // ST
-          auto top = operands_stack.top();
-          auto stack_arg_index =
-              operands_stack.base_pointer - 2 - operands_stack.n_args + n;
-          operands_stack.data[stack_arg_index] = top;
-          break;
-        } else if (h == 2) {
-          // LD
-          auto stack_arg_index =
-              operands_stack.base_pointer - 2 - operands_stack.n_args + n;
-          operands_stack.push(operands_stack.data[stack_arg_index]);
-          break;
-        } else if (h == 3) {
-          // LDA
-          auto ref = BOX(create_reference(n, ARG));
-          operands_stack.push(ref);
-          operands_stack.push(ref);
-          break;
-        }
-        unsupported();
-        break;
-      }
-      case 3: {
-        int index = INT;
-        fprintf(stderr, "C(%d)", index);
-        if (h == 4) { // ST
-          write_reference(create_reference(index, CAPTURED), operands_stack.top());
-          break;
-        } else if (h == 2) { // LD
-          // operands_stack.print_content();
-          operands_stack.push(*(u32*)create_reference(index, CAPTURED));
-          break;
-        }
-        unsupported();
-        break;
-      }
-      default:
-        FAIL;
-      }
+      auto value = *(u32 *)create_reference(index, kind);
+      operands_stack.push(value);
       break;
+    }
+    case 4: { // ST
+      fprintf(stderr, "%s\t", lds[h - 2]);
+      i32 index = INT;
+      u32 kind = -1;
+      if (l == 0) {
+        kind = GLOBAL;
+      } else if (l == 1) {
+        kind = LOCAL;
+      } else if (l == 2) {
+        kind = ARG;
+      } else if (l == 3) {
+        kind = CAPTURED;
+      }
+      auto top = operands_stack.top();
+      write_reference(create_reference(index, kind), top);
+      break;
+    }
+    case 3: {
+      fprintf(stderr, "%s\t", lds[h - 2]);
+      i32 index = INT;
+      u32 kind = -1;
+      if (l == 0) {
+        kind = GLOBAL;
+      } else if (l == 1) {
+        kind = LOCAL;
+      } else if (l == 2) {
+        kind = ARG;
+      } else if (l == 3) {
+        kind = CAPTURED;
+      }
+      auto ref = create_reference(index, kind);
+      operands_stack.push(ref);
+      operands_stack.push(ref);
+      break;
+    }
 
     case 5:
       switch (l) {
@@ -579,7 +536,8 @@ void interpret(FILE *f, bytefile *bf) {
           case 3: {
             int index = INT;
             fprintf(stderr, "C(%d)", index);
-            operands_stack.push((u32)(*((u32 *)create_reference(index, CAPTURED))));
+            operands_stack.push(
+                (u32)(*((u32 *)create_reference(index, CAPTURED))));
             break;
           }
           default:
