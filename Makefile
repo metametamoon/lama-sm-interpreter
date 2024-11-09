@@ -8,8 +8,14 @@ RM=rm -rf
 
 check: $(TESTS)
 
-build/vm: main.cpp
-	g++ -m32 -g -g2 -fstack-protector-all -Werror -o build/vm $<
+stuff:
+
+# g++ build/main.o src/runtime/runtime.a -o build/vm -m32 -g2 -fstack-protector-all -no-pie
+
+build/vm: src/main.cpp
+	g++ -m32 -g -g2 -fstack-protector-all -Werror -o build/main.o -c $<
+	make -C src/runtime/ all
+	gcc build/main.o src/runtime/gc.o src/runtime/runtime.o -o build/vm -m32 -g2 -fstack-protector-all
 
 $(TESTS): %: %.lama build/vm
 	@echo $@

@@ -10,8 +10,13 @@
 #include <string.h>
 // #include "runtime/gc.h"
 #include "runtime/runtime_common.h"
+extern "C" void *Belem (void *p, int i);
+extern "C" void *Bsta (void *v, int i, void *x); 
+extern "C" void *Bstring (void *p);
+extern "C" int Llength (void *p);
 
-extern "C" void* alloc_string(int);
+extern "C" size_t *__gc_stack_top, *__gc_stack_bottom;
+extern "C" void __init();
 
 using u32 = uint32_t;
 using i32 = int32_t;
@@ -31,6 +36,7 @@ struct stack {
   u32 base_pointer = 0;
   u32 n_args = 2; // default
   void push(T value) {
+    __gc_stack_bottom++;
     data[stack_pointer++] = value;
   }
 
@@ -39,6 +45,7 @@ struct stack {
       fprintf(stderr, "negative stack\n");
       exit(-1);
     }
+    __gc_stack_bottom--;
     return data[--stack_pointer];
   }
   T top() {
@@ -173,6 +180,8 @@ void interpret(FILE *f, bytefile *bf) {
                               "#ref", "#val",    "#fun"};
   char const *const lds[] = {"LD", "LDA", "ST"};
   auto operands_stack = stack<u32>{};
+  __gc_stack_top = (size_t*)operands_stack.data.data();
+  __gc_stack_bottom = (size_t*)operands_stack.data.data();
   auto return_address_stack = stack<char*>{};
   auto globals = std::array<u32, 1000>{};
   // auto locals = std::vector<stackframe> {};
@@ -183,22 +192,22 @@ void interpret(FILE *f, bytefile *bf) {
   u32 const LOCAL =  2;
   u32 const ARG = 3;
   auto create_reference = [&](u32 index, u32 kind) -> u32 {
-    return (index << 2) | kind;
-  };
-  auto write_reference = [&](u32 reference, u32 value) -> void {
-    u32 index = reference >> 2;
-    u32 kind = reference & 0b11;
     if (kind == GLOBAL) {
-      globals[index] = value;
+      return (u32)&globals[index];
     } else if (kind == LOCAL) {
-      operands_stack.data[operands_stack.base_pointer + 1 + index] = value;
-    } else if (kind == ARG){
+      return (u32)&operands_stack.data[operands_stack.base_pointer + 1 + index];
+    } else if (kind == ARG) {
       auto stack_arg_index = operands_stack.base_pointer - 2 - operands_stack.n_args + index;
-      operands_stack.data[stack_arg_index] = value;
+      return (u32)&operands_stack.data[stack_arg_index];
     } else {
       unsupported();
+      return 0;
     }
   };
+  auto write_reference = [&](u32 reference, u32 value) -> void {
+    *((u32*)reference) = value;
+  };
+  __init();
 
   do {
     // operands_stack.print_ptrs();
@@ -233,10 +242,12 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 1: {
         char* string = STRING;
-        fprintf(f, "STRING\t%s", string);
-        i32 n = std::strlen(string);
-        data* obj_string = (data*)alloc_string(n + 1);
-        strncpy(obj_string->contents, string, n);
+        fprintf(stderr, "STRING\t%s", string);
+        // i32 n = std::strlen(string);
+        char* obj_string = (char*)Bstring((void*)string);
+        // fprintf(stderr, "obj_string=%p", (void*)obj_string);
+        // data* obj_string = (data*)alloc_string(n + 1);
+        fprintf(stderr, "str is %s\n", obj_string);
         operands_stack.push(u32(obj_string));
         // unsupported();
         break;
@@ -255,11 +266,10 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 4: {
         fprintf(stderr, "STA");
-        // operands_stack.print_content();
-        u32 value = operands_stack.pop(); // preserve the boxing kind
-        u32 ref = UNBOX(operands_stack.pop());
-        write_reference(ref, value);
-        operands_stack.push(BOX(value));
+        auto value = (void*) operands_stack.pop();
+        auto i = (int) operands_stack.pop();
+        auto x = (void*) operands_stack.pop();
+        operands_stack.push((u32)Bsta(value, i, x));
         break;
       }
 
@@ -313,11 +323,13 @@ void interpret(FILE *f, bytefile *bf) {
         break;
 
       case 11:{
-        fprintf(f, "ELEM");
-        auto index = UNBOX(operands_stack.pop());
-        auto obj_string = (data*)operands_stack.pop();
-        auto string_data = obj_string->contents;
-        operands_stack.push(BOX(*(string_data + index)));
+        fprintf(stderr, "ELEM");
+        auto index = (int)operands_stack.pop();
+        auto obj_string = (void*)operands_stack.pop();
+        u32 elem = (u32)Belem(obj_string, index);
+        u32 ch = UNBOX(elem);
+        fprintf(stderr, "At elem: %d (before unbox: %d)\n", elem, ch);
+        operands_stack.push(elem);
         break;
       }
 
@@ -343,7 +355,9 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 3) {
           // LDA
-          operands_stack.push(BOX(create_reference(n, GLOBAL)));
+          auto ref = create_reference(n, GLOBAL);
+          operands_stack.push(ref);
+          operands_stack.push(ref);
           break;
         }
         unsupported();
@@ -363,7 +377,9 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 3) {
           // LDA
-          operands_stack.push(BOX(create_reference(n, LOCAL)));
+          auto ref = BOX(create_reference(n, LOCAL));
+          operands_stack.push(ref);
+          operands_stack.push(ref);
           break;
         }
         unsupported();
@@ -385,7 +401,9 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 3) {
           // LDA
-          operands_stack.push(BOX(create_reference(n, ARG)));
+          auto ref = BOX(create_reference(n, ARG));
+          operands_stack.push(ref);
+          operands_stack.push(ref);
           break;
         }
         unsupported();
@@ -537,10 +555,14 @@ void interpret(FILE *f, bytefile *bf) {
         operands_stack.push(BOX(0));
         break;
       }
-      case 2:
-        fprintf(f, "CALL\tLlength");
-        unsupported();
+      case 2: {
+        fprintf(stderr, "CALL\tLlength");
+        int value = (int)operands_stack.pop();
+        char* str = (char*) value;
+        int result = Llength((void*)value);
+        operands_stack.push((u32)result);
         break;
+      }
 
       case 3:
         fprintf(f, "CALL\tLstring");
