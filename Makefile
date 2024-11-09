@@ -13,12 +13,14 @@ stuff:
 # g++ build/main.o src/runtime/runtime.a -o build/vm -m32 -g2 -fstack-protector-all -no-pie
 
 build/vm: src/main.cpp
+	mkdir -p build
 	g++ -m32 -g -g2 -fstack-protector-all -Werror -o build/main.o -c $<
 	make -C src/runtime/ all
 	gcc build/main.o src/runtime/gc.o src/runtime/runtime.o -o build/vm -m32 -g2 -fstack-protector-all
 
 
 build/vm-opt: src/main.cpp
+	mkdir -p build
 	g++ -m32 -O3 -g2 -fstack-protector-all -Werror -o build/main.o -c $<
 	make -C src/runtime/ all
 	gcc build/main.o src/runtime/gc.o src/runtime/runtime.o -o build/vm-opt -m32 -g2 -fstack-protector-all

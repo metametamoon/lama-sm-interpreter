@@ -1,6 +1,6 @@
-	.file "/home/metametamoon/projects/university/vm/lama-vm-make/performance/Sort.lama"
+	.file "/tmp/tmp.PatTSjjGbI/performance/Sort.lama"
 
-	.stabs "/home/metametamoon/projects/university/vm/lama-vm-make/performance/Sort.lama",100,0,0,.Ltext
+	.stabs "/tmp/tmp.PatTSjjGbI/performance/Sort.lama",100,0,0,.Ltext
 
 	.globl	main
 
