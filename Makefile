@@ -17,6 +17,14 @@ build/vm: src/main.cpp
 	make -C src/runtime/ all
 	gcc build/main.o src/runtime/gc.o src/runtime/runtime.o -o build/vm -m32 -g2 -fstack-protector-all
 
+
+build/vm-opt: src/main.cpp
+	g++ -m32 -O3 -g2 -fstack-protector-all -Werror -o build/main.o -c $<
+	make -C src/runtime/ all
+	gcc build/main.o src/runtime/gc.o src/runtime/runtime.o -o build/vm-opt -m32 -g2 -fstack-protector-all
+
+
+
 $(TESTS): %: %.lama build/vm
 	@echo $@
 	lamac -b $<
@@ -28,10 +36,12 @@ $(TESTS): %: %.lama build/vm
 regression: build/vm
 	$(MAKE) -C regression
 
+benchmark: build/vm
+	$(MAKE) -C performance
 
 .PHONY: regression-full
 
-regression-full: build/vm
+regression-full: build/vm-opt
 	$(MAKE) -C regression-full
 
 clean:

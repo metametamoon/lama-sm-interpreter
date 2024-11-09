@@ -12,7 +12,7 @@ $(TESTS): %: %.lama
 	@echo $@
 	$(LAMAC) $@.lama -b
 	# byterun $@.bc > $@.dis
-	cat $@.input | ../build/vm $@.bc 2> /dev/null > $@.log && diff $@.log orig/$@.log --strip-trailing-cr
+	cat $@.input | ../build/vm-opt $@.bc 2> /dev/null > $@.log && diff $@.log orig/$@.log --strip-trailing-cr
 
 ctest111:
 	@echo "regression/test111"
