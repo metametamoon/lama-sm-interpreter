@@ -134,6 +134,14 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
+// #define DEBUG
+
+#ifdef DEBUG
+#define debug(...) fprintf(__VA_ARGS__)
+#else
+#define debug(...)
+#endif
+
 void unsupported() {
   fprintf(stderr, "unsupported");
   exit(-1);
@@ -225,12 +233,7 @@ void interpret(FILE *f, bytefile *bf) {
       +[](u32 l, u32 r) -> u32 { return l * r; },
       +[](u32 l, u32 r) -> u32 { return l / r; },
       +[](u32 l, u32 r) -> u32 { return l % r; },
-      +[](u32 l, u32 r) -> u32 {
-        u32 result = i32(l) < i32(r);
-        // fprintf(stderr, "wiithin binop: %d < % d = %llu\n", (i32)l, (i32)r,
-        // result);
-        return i32(l) < i32(r);
-      },
+      +[](u32 l, u32 r) -> u32 { return i32(l) < i32(r); },
       +[](u32 l, u32 r) -> u32 { return i32(l) <= i32(r); },
       +[](u32 l, u32 r) -> u32 { return i32(l) > i32(r); },
       +[](u32 l, u32 r) -> u32 { return i32(l) >= i32(r); },
@@ -284,16 +287,15 @@ void interpret(FILE *f, bytefile *bf) {
   bool in_closure = false;
 
   do {
-    operands_stack.print_ptrs();
     char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
-    fprintf(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
+    debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
     case 15:
       goto stop;
 
     /* BINOP */
     case 0:
-      fprintf(stderr, "BINOP\t%s", ops[l - 1]);
+      debug(stderr, "BINOP\t%s", ops[l - 1]);
       if (l - 1 <= ops_array.size()) {
         u32 t2 = UNBOX(operands_stack.pop());
         u32 t1 = UNBOX(operands_stack.pop());
@@ -309,13 +311,13 @@ void interpret(FILE *f, bytefile *bf) {
       case 0: {
         auto arg = INT;
         operands_stack.push(BOX(arg));
-        fprintf(stderr, "CONST\t%d", arg);
+        debug(stderr, "CONST\t%d", arg);
         break;
       }
 
       case 1: {
         char *string = STRING;
-        fprintf(stderr, "STRING\t%s", string);
+        debug(stderr, "STRING\t%s", string);
         char *obj_string = (char *)Bstring((void *)string);
         operands_stack.push(u32(obj_string));
         break;
@@ -324,20 +326,20 @@ void interpret(FILE *f, bytefile *bf) {
       case 2: {
         char *tag = STRING;
         int n = INT;
-        fprintf(stderr, "SEXP\t%s ", tag);
-        fprintf(stderr, "%d", n);
+        debug(stderr, "SEXP\t%s ", tag);
+        debug(stderr, "%d", n);
         auto value = myBsexp(n, operands_stack, tag);
         operands_stack.push(u32(value));
         break;
       }
 
       case 3:
-        fprintf(f, "STI");
+        debug(f, "STI");
         unsupported();
         break;
 
       case 4: {
-        fprintf(stderr, "STA");
+        debug(stderr, "STA");
         auto value = (void *)operands_stack.pop();
         auto i = (int)operands_stack.pop();
         auto x = (void *)operands_stack.pop();
@@ -347,13 +349,13 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 5: {
         auto jump_location = INT;
-        fprintf(stderr, "JMP\t0x%.8x", jump_location);
+        debug(stderr, "JMP\t0x%.8x", jump_location);
         ip = bf->code_ptr + jump_location;
         break;
       }
 
       case 6: {
-        fprintf(stderr, "END");
+        debug(stderr, "END");
         if (operands_stack.base_pointer != operands_stack.stack_begin + 3) {
           u32 ret_value = operands_stack.pop(); // preserve the boxing kind
           u32 top_n_args = operands_stack.n_args;
@@ -378,12 +380,12 @@ void interpret(FILE *f, bytefile *bf) {
       }
 
       case 7:
-        fprintf(f, "RET");
+        debug(stderr, "RET");
         unsupported();
         break;
 
       case 8:
-        fprintf(stderr, "DROP");
+        debug(stderr, "DROP");
         if (operands_stack.stack_pointer == 0) {
           printf("Error: negative stack\n");
           exit(-1);
@@ -392,19 +394,19 @@ void interpret(FILE *f, bytefile *bf) {
         break;
 
       case 9: {
-        fprintf(stderr, "DUP");
+        debug(stderr, "DUP");
         u32 v = operands_stack.top();
         operands_stack.push(v);
         break;
       }
 
       case 10:
-        fprintf(f, "SWAP");
+        debug(f, "SWAP");
         unsupported();
         break;
 
       case 11: {
-        fprintf(stderr, "ELEM");
+        debug(stderr, "ELEM");
         auto index = (int)operands_stack.pop();
         auto obj = (void *)operands_stack.pop();
         u32 elem = (u32)Belem(obj, index);
@@ -417,7 +419,7 @@ void interpret(FILE *f, bytefile *bf) {
       }
       break;
     case 2: { // LD
-      fprintf(stderr, "%s\t", lds[h - 2]);
+      debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
       u32 kind = -1;
       if (l == 0) {
@@ -434,7 +436,7 @@ void interpret(FILE *f, bytefile *bf) {
       break;
     }
     case 4: { // ST
-      fprintf(stderr, "%s\t", lds[h - 2]);
+      debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
       u32 kind = -1;
       if (l == 0) {
@@ -451,7 +453,7 @@ void interpret(FILE *f, bytefile *bf) {
       break;
     }
     case 3: {
-      fprintf(stderr, "%s\t", lds[h - 2]);
+      debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
       u32 kind = -1;
       if (l == 0) {
@@ -473,7 +475,7 @@ void interpret(FILE *f, bytefile *bf) {
       switch (l) {
       case 0: {
         auto jump_location = INT;
-        fprintf(stderr, "CJMPz\t0x%.8x", jump_location);
+        debug(stderr, "CJMPz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
         if (top == 0) {
           ip = bf->code_ptr + jump_location;
@@ -483,7 +485,7 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 1: {
         auto jump_location = INT;
-        fprintf(stderr, "CJMPnz\t0x%.8x", jump_location);
+        debug(stderr, "CJMPnz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
         if (top != 0) {
           ip = bf->code_ptr + jump_location;
@@ -496,10 +498,10 @@ void interpret(FILE *f, bytefile *bf) {
         int n_args = INT;
         int n_locals = INT;
         if (l == 3) {
-          fprintf(stderr, "C");
+          debug(stderr, "C");
         }
-        fprintf(stderr, "BEGIN\t%d ", n_args);
-        fprintf(stderr, "%d", n_locals);
+        debug(stderr, "BEGIN\t%d ", n_args);
+        debug(stderr, "%d", n_locals);
         operands_stack.push(BOX(operands_stack.n_args));
         operands_stack.push(BOX(operands_stack.base_pointer));
         operands_stack.n_args = n_args;
@@ -511,31 +513,31 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 4: {
         int addr = INT;
-        fprintf(stderr, "CLOSURE\t0x%.8x", addr);
+        debug(stderr, "CLOSURE\t0x%.8x", addr);
         int n = INT;
         for (int i = 0; i < n; i++) {
           switch (BYTE) {
           case 0: {
             int index = INT;
-            fprintf(stderr, "G(%d)", index);
+            debug(stderr, "G(%d)", index);
             operands_stack.push((u32) * (u32 *)create_reference(index, GLOBAL));
             break;
           }
           case 1: {
             int index = INT;
-            fprintf(stderr, "L(%d)", index);
+            debug(stderr, "L(%d)", index);
             operands_stack.push((u32) * (u32 *)create_reference(index, LOCAL));
             break;
           }
           case 2: {
             int index = INT;
-            fprintf(stderr, "A(%d)", index);
+            debug(stderr, "A(%d)", index);
             operands_stack.push((u32)(*((u32 *)create_reference(index, ARG))));
             break;
           }
           case 3: {
             int index = INT;
-            fprintf(stderr, "C(%d)", index);
+            debug(stderr, "C(%d)", index);
             operands_stack.push(
                 (u32)(*((u32 *)create_reference(index, CAPTURED))));
             break;
@@ -552,7 +554,7 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 5: {
         int n_arg = INT;
-        fprintf(stderr, "CALLC\t%d", n_arg);
+        debug(stderr, "CALLC\t%d", n_arg);
         // if (n_arg == 0) {
         u32 closure =
             operands_stack.data[operands_stack.stack_pointer - 1 - n_arg];
@@ -565,8 +567,9 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 6: {
         int loc = INT;
-        fprintf(stderr, "CALL\t0x%.8x ", loc);
-        fprintf(stderr, "%d", INT);
+        int n = INT;
+        debug(stderr, "CALL\t0x%.8x ", loc);
+        debug(stderr, "%d", n);
         operands_stack.push(u32(ip));
         ip = bf->code_ptr + loc;
         break;
@@ -575,8 +578,8 @@ void interpret(FILE *f, bytefile *bf) {
       case 7: {
         const char *name = STRING;
         int n = INT;
-        fprintf(stderr, "TAG\t%s ", name);
-        fprintf(stderr, "%d", n);
+        debug(stderr, "TAG\t%s ", name);
+        debug(stderr, "%d", n);
         u32 v =
             Btag((void *)operands_stack.pop(), LtagHash((char *)name), BOX(n));
         operands_stack.push(v);
@@ -585,7 +588,7 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 8: {
         int size = INT;
-        fprintf(stderr, "ARRAY\t%d", size);
+        debug(stderr, "ARRAY\t%d", size);
         size_t is_array_n =
             (size_t)Barray_patt((void *)operands_stack.pop(), BOX(size));
         operands_stack.push(is_array_n);
@@ -598,9 +601,11 @@ void interpret(FILE *f, bytefile *bf) {
         unsupported();
         break;
 
-      case 10:
-        fprintf(stderr, "LINE\t%d", INT);
+      case 10: {
+        int line = INT;
+        debug(stderr, "LINE\t%d", line);
         break;
+      }
 
       default:
         FAIL;
@@ -608,7 +613,7 @@ void interpret(FILE *f, bytefile *bf) {
       break;
 
     case 6:
-      fprintf(stderr, "PATT\t%s", pats[l]);
+      debug(stderr, "PATT\t%s", pats[l]);
       switch (l) {
       case 0: { // =str
         auto arg = (void *)operands_stack.pop();
@@ -622,7 +627,6 @@ void interpret(FILE *f, bytefile *bf) {
       case 4:
       case 5:
       case 6: {
-        fprintf(stderr, "Here with l=%d\n", (int)l);
         auto arg = operands_stack.pop();
         auto function = pats_tags_matches[l];
         operands_stack.push(function((void *)arg));
@@ -642,22 +646,20 @@ void interpret(FILE *f, bytefile *bf) {
     case 7: {
       switch (l) {
       case 0: {
-        fprintf(stderr, "CALL\tLread");
+        debug(stderr, "CALL\tLread");
         operands_stack.push(Lread());
         break;
       }
 
       case 1: {
-        // operands_stack.print_content();
         u32 value = UNBOX(operands_stack.pop());
-        fprintf(stderr, "CALL\tLwrite");
-        // fprintf(stdout, "\nout = %d\n", int32_t(value));
+        debug(stderr, "CALL\tLwrite");
         fprintf(stdout, "%d\n", i32(value));
         operands_stack.push(BOX(0));
         break;
       }
       case 2: {
-        fprintf(stderr, "CALL\tLlength");
+        debug(stderr, "CALL\tLlength");
         int value = (int)operands_stack.pop();
         char *str = (char *)value;
         int result = Llength((void *)value);
@@ -666,14 +668,14 @@ void interpret(FILE *f, bytefile *bf) {
       }
 
       case 3: {
-        fprintf(stderr, "CALL\tLstring");
+        debug(stderr, "CALL\tLstring");
         operands_stack.push((u32)Lstring(((void *)operands_stack.pop())));
         break;
       }
 
       case 4: {
         i32 n = INT;
-        fprintf(stderr, "CALL\tBarray\t%d", n);
+        debug(stderr, "CALL\tBarray\t%d", n);
         auto arr = myBarray(n, operands_stack);
         operands_stack.push(u32(arr));
         break;
@@ -688,26 +690,26 @@ void interpret(FILE *f, bytefile *bf) {
       FAIL;
     }
 
-    fprintf(stderr, "\n");
+    debug(stderr, "\n");
   } while (1);
 stop:
-  fprintf(stderr, "<end>\n");
+  debug(stderr, "<end>\n");
 }
 
 /* Dumps the contents of the file */
 void dump_file(FILE *f, bytefile *bf) {
   int i;
 
-  fprintf(stderr, "String table size       : %d\n", bf->stringtab_size);
-  fprintf(stderr, "Global area size        : %d\n", bf->global_area_size);
-  fprintf(stderr, "Number of public symbols: %d\n", bf->public_symbols_number);
-  fprintf(stderr, "Public symbols          :\n");
+  debug(stderr, "String table size       : %d\n", bf->stringtab_size);
+  debug(stderr, "Global area size        : %d\n", bf->global_area_size);
+  debug(stderr, "Number of public symbols: %d\n", bf->public_symbols_number);
+  debug(stderr, "Public symbols          :\n");
 
   for (i = 0; i < bf->public_symbols_number; i++)
-    fprintf(stderr, "   0x%.8x: %s\n", get_public_offset(bf, i),
-            get_public_name(bf, i));
+    debug(stderr, "   0x%.8x: %s\n", get_public_offset(bf, i),
+          get_public_name(bf, i));
 
-  fprintf(stderr, "Code:\n");
+  debug(stderr, "Code:\n");
   interpret(f, bf);
 }
 
