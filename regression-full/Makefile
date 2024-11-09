@@ -11,7 +11,7 @@ check: $(TESTS)
 $(TESTS): %: %.lama
 	@echo $@
 	$(LAMAC) $@.lama -b
-	byterun $@.bc > $@.dis
+	# byterun $@.bc > $@.dis
 	cat $@.input | ../build/vm $@.bc 2> /dev/null > $@.log && diff $@.log orig/$@.log --strip-trailing-cr
 
 ctest111:

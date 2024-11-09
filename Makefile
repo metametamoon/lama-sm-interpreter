@@ -20,7 +20,7 @@ build/vm: src/main.cpp
 $(TESTS): %: %.lama build/vm
 	@echo $@
 	lamac -b $<
-	byterun $@.bc > bytecodes-r/$@.dis
+	# byterun $@.bc > bytecodes-r/$@.dis
 	mv $@.bc bytecodes/$@.bc
 	build/vm bytecodes/$@.bc > outs/$@.out # 2> /dev/null
 	diff outs/$@.out exps/$@.exp --strip-trailing-cr
