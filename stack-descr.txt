@@ -32,3 +32,4 @@ ret_addr
 arg2
 arg1
 arg0
+[opt]closure

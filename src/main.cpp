@@ -11,12 +11,23 @@
 #include <string.h>
 // #include "runtime/gc.h"
 #include "runtime/runtime_common.h"
-extern "C" void *Belem (void *p, int i);
-extern "C" void *Bsta (void *v, int i, void *x); 
-extern "C" void *Bstring (void *p);
-extern "C" int Llength (void *p);
-extern "C" void* alloc_array(int);
+extern "C" void *Belem(void *p, int i);
+extern "C" void *Bsta(void *v, int i, void *x);
+extern "C" void *Bstring(void *p);
+extern "C" int Llength(void *p);
+extern "C" int Lread();
+extern "C" void *alloc_array(int);
+extern "C" int Btag(void *d, int t, int n);
+extern "C" void *Lstring(void *p);
+extern "C" int Bstring_patt(void *x, void *y);
+extern "C" int Bclosure_tag_patt(void *x);
+extern "C" int Bboxed_patt(void *x);
+extern "C" int Bunboxed_patt(void *x);
+extern "C" int Barray_tag_patt(void *x);
+extern "C" int Bstring_tag_patt(void *x);
+extern "C" int Bsexp_tag_patt(void *x);
 
+extern "C" int Barray_patt(void *d, int n);
 
 extern "C" size_t *__gc_stack_top, *__gc_stack_bottom;
 extern "C" void __init();
@@ -24,16 +35,12 @@ extern "C" void __init();
 using u32 = uint32_t;
 using i32 = int32_t;
 
-
 // #define UNBOXED(x) (((u32)(x)) & 0x0001)
 #define BOXED(x) (((u32)(x)) & 0x0001)
 // #define UNBOX(x) (((u32)(x)) >> 1)
 // #define BOX(x) ((((u32)(x)) << 1) | 0x0001)
 
-
-
-template <typename T>
-struct stack {
+template <typename T> struct stack {
   std::array<T, 100000> data;
   u32 stack_begin = 100;
   u32 stack_pointer = stack_begin;
@@ -41,14 +48,14 @@ struct stack {
   u32 n_args = 2; // default
 
   stack() {
-    __gc_stack_bottom = (size_t*)(data.data() + stack_pointer);
-    __gc_stack_top = (size_t*)(data.data());
+    __gc_stack_bottom = (size_t *)(data.data() + stack_pointer);
+    __gc_stack_top = (size_t *)(data.data());
   }
 
   void push(T value) {
     __gc_stack_bottom++;
     data[stack_pointer++] = value;
-    assert((void*)__gc_stack_bottom == (void*)(data.data() + stack_pointer));
+    assert((void *)__gc_stack_bottom == (void *)(data.data() + stack_pointer));
   }
 
   T pop() {
@@ -59,9 +66,7 @@ struct stack {
     __gc_stack_bottom--;
     return data[--stack_pointer];
   }
-  T top() {
-    return data[stack_pointer - 1];
-  }
+  T top() { return data[stack_pointer - 1]; }
 
   void print_ptrs() {
     fprintf(stderr, "rbp=%d rsp=%d\n", base_pointer, stack_pointer);
@@ -69,7 +74,7 @@ struct stack {
 
   void print_content() {
     print_ptrs();
-    for (i32 i = stack_pointer; i >= 0; --i ) {
+    for (i32 i = stack_pointer; i >= 0; --i) {
       fprintf(stderr, "%.2d: ", i);
       if (BOXED(data[i])) {
         fprintf(stderr, "B(%u)\n", UNBOX(data[i]));
@@ -80,8 +85,8 @@ struct stack {
   }
 };
 
-void *myBarray (int n, stack<u32>& ops_stack) {
-  data* r = (data *)alloc_array(n);
+void *myBarray(int n, stack<u32> &ops_stack) {
+  data *r = (data *)alloc_array(n);
   for (i32 i = n - 1; i >= 0; --i) {
     i32 elem = ops_stack.pop();
     ((int *)r->contents)[i] = elem;
@@ -89,18 +94,17 @@ void *myBarray (int n, stack<u32>& ops_stack) {
   return r->contents;
 }
 
-extern "C" void *alloc_sexp (int members);
-extern "C" int   LtagHash (char *);
-void *myBsexp (int n, stack<u32>& ops_stack, char* name) {
+extern "C" void *alloc_sexp(int members);
+extern "C" int LtagHash(char *);
+void *myBsexp(int n, stack<u32> &ops_stack, char *name) {
   va_list args;
-  int     i;
-  int     ai;
+  int i;
+  int ai;
   size_t *p;
-  data   *r;
-  int fields_cnt   = n;
-  r                = (data *)alloc_sexp(fields_cnt);
+  data *r;
+  int fields_cnt = n;
+  r = (data *)alloc_sexp(fields_cnt);
   ((sexp *)r)->tag = 0;
-
 
   for (i = n; i > 0; --i) {
     ai = ops_stack.pop();
@@ -112,6 +116,20 @@ void *myBsexp (int n, stack<u32>& ops_stack, char* name) {
   return (int *)r->contents;
 }
 
+extern "C" void *alloc_closure(int);
+void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
+  int i, ai;
+  data *r;
+  r = (data *)alloc_closure(n + 1);
+  ((void **)r->contents)[0] = addr;
+
+  for (i = n; i >= 1; --i) {
+    ai = ops_stack.pop();
+    ((int *)r->contents)[i] = ai;
+  }
+
+  return r->contents;
+}
 
 void *__start_custom_data;
 void *__stop_custom_data;
@@ -187,7 +205,6 @@ bytefile *read_file(char *fname) {
   return file;
 }
 
-
 /* Disassembles the bytecode pool */
 void interpret(FILE *f, bytefile *bf) {
 #define INT (ip += sizeof(int), *(int *)(ip - sizeof(int)))
@@ -208,12 +225,14 @@ void interpret(FILE *f, bytefile *bf) {
       +[](u32 l, u32 r) -> u32 { return l * r; },
       +[](u32 l, u32 r) -> u32 { return l / r; },
       +[](u32 l, u32 r) -> u32 { return l % r; },
-      +[](u32 l, u32 r) -> u32 { 
+      +[](u32 l, u32 r) -> u32 {
         u32 result = i32(l) < i32(r);
-        // fprintf(stderr, "wiithin binop: %d < % d = %llu\n", (i32)l, (i32)r, result);
-        return i32(l) < i32(r); },
+        // fprintf(stderr, "wiithin binop: %d < % d = %llu\n", (i32)l, (i32)r,
+        // result);
+        return i32(l) < i32(r);
+      },
       +[](u32 l, u32 r) -> u32 { return i32(l) <= i32(r); },
-      +[](u32 l, u32 r) -> u32 { return i32(l) >  i32(r); },
+      +[](u32 l, u32 r) -> u32 { return i32(l) > i32(r); },
       +[](u32 l, u32 r) -> u32 { return i32(l) >= i32(r); },
       +[](u32 l, u32 r) -> u32 { return i32(l) == i32(r); },
       +[](u32 l, u32 r) -> u32 { return i32(l) != i32(r); },
@@ -222,35 +241,50 @@ void interpret(FILE *f, bytefile *bf) {
   };
   char const *const pats[] = {"=str", "#string", "#array", "#sexp",
                               "#ref", "#val",    "#fun"};
+  using tag_pattern = int (*)(void *);
+  auto pats_tags_matches = std::array<tag_pattern, 10>{
+      nullptr,     Bstring_tag_patt, Barray_tag_patt,   Bsexp_tag_patt,
+      Bboxed_patt, Bunboxed_patt,    Bclosure_tag_patt,
+  };
   char const *const lds[] = {"LD", "LDA", "ST"};
   auto operands_stack = stack<u32>{};
-  assert((void*)__gc_stack_bottom == (void*)(operands_stack.data.data() + operands_stack.stack_pointer));
+  assert((void *)__gc_stack_bottom ==
+         (void *)(operands_stack.data.data() + operands_stack.stack_pointer));
   __gc_stack_bottom = operands_stack.data.data() + operands_stack.stack_pointer;
   // pseudo first two args
   operands_stack.push(BOX(0));
   operands_stack.push(BOX(0));
   u32 const GLOBAL = 1;
-  u32 const LOCAL =  2;
+  u32 const LOCAL = 2;
   u32 const ARG = 3;
+  u32 const CAPTURED = 4;
   auto create_reference = [&](u32 index, u32 kind) -> u32 {
     if (kind == GLOBAL) {
       return (u32)&operands_stack.data[operands_stack.stack_begin - 1 - index];
     } else if (kind == LOCAL) {
       return (u32)&operands_stack.data[operands_stack.base_pointer + 1 + index];
     } else if (kind == ARG) {
-      auto stack_arg_index = operands_stack.base_pointer - 2 - operands_stack.n_args + index;
+      auto stack_arg_index =
+          operands_stack.base_pointer - 2 - operands_stack.n_args + index;
       return (u32)&operands_stack.data[stack_arg_index];
+    } else if (kind == CAPTURED) {
+      auto closure_index =
+          operands_stack.base_pointer - 2 - operands_stack.n_args - 1;
+      u32 *closure = (u32 *)operands_stack.data[closure_index];
+      return (u32)&closure[1 + index];
     } else {
       unsupported();
       return 0;
     }
   };
   auto write_reference = [&](u32 reference, u32 value) -> void {
-    *((u32*)reference) = value;
+    *((u32 *)reference) = value;
   };
   __init();
+  bool in_closure = false;
 
   do {
+    operands_stack.print_ptrs();
     char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     fprintf(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
@@ -280,23 +314,17 @@ void interpret(FILE *f, bytefile *bf) {
       }
 
       case 1: {
-        char* string = STRING;
+        char *string = STRING;
         fprintf(stderr, "STRING\t%s", string);
-        // i32 n = std::strlen(string);
-        char* obj_string = (char*)Bstring((void*)string);
-        // fprintf(stderr, "obj_string=%p", (void*)obj_string);
-        // data* obj_string = (data*)alloc_string(n + 1);
-        fprintf(stderr, "str is %s\n", obj_string);
+        char *obj_string = (char *)Bstring((void *)string);
         operands_stack.push(u32(obj_string));
-        // unsupported();
         break;
       }
 
       case 2: {
-        char* tag = STRING;
+        char *tag = STRING;
         int n = INT;
         fprintf(stderr, "SEXP\t%s ", tag);
-        operands_stack.print_content();
         fprintf(stderr, "%d", n);
         auto value = myBsexp(n, operands_stack, tag);
         operands_stack.push(u32(value));
@@ -310,9 +338,9 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 4: {
         fprintf(stderr, "STA");
-        auto value = (void*) operands_stack.pop();
-        auto i = (int) operands_stack.pop();
-        auto x = (void*) operands_stack.pop();
+        auto value = (void *)operands_stack.pop();
+        auto i = (int)operands_stack.pop();
+        auto x = (void *)operands_stack.pop();
         operands_stack.push((u32)Bsta(value, i, x));
         break;
       }
@@ -334,10 +362,16 @@ void interpret(FILE *f, bytefile *bf) {
           operands_stack.n_args = UNBOX(operands_stack.pop());
           u32 ret_ip = operands_stack.pop();
           operands_stack.stack_pointer -= top_n_args;
-          __gc_stack_bottom = operands_stack.data.data() + operands_stack.stack_pointer;
+          if (in_closure) {
+            operands_stack.stack_pointer -= 1;
+          }
+          __gc_stack_bottom =
+              operands_stack.data.data() + operands_stack.stack_pointer;
           operands_stack.push(ret_value);
-          ip = (char*) ret_ip;
+          ip = (char *)ret_ip;
+          in_closure = false;
         } else {
+          in_closure = false;
           goto stop;
         }
         break;
@@ -357,20 +391,22 @@ void interpret(FILE *f, bytefile *bf) {
         operands_stack.pop();
         break;
 
-      case 9:
-        fprintf(f, "DUP");
-        unsupported();
+      case 9: {
+        fprintf(stderr, "DUP");
+        u32 v = operands_stack.top();
+        operands_stack.push(v);
         break;
+      }
 
       case 10:
         fprintf(f, "SWAP");
         unsupported();
         break;
 
-      case 11:{
+      case 11: {
         fprintf(stderr, "ELEM");
         auto index = (int)operands_stack.pop();
-        auto obj = (void*)operands_stack.pop();
+        auto obj = (void *)operands_stack.pop();
         u32 elem = (u32)Belem(obj, index);
         operands_stack.push(elem);
         break;
@@ -390,11 +426,13 @@ void interpret(FILE *f, bytefile *bf) {
         fprintf(stderr, "G(%d)", n);
         if (h == 4) {
           // ST
-          operands_stack.data[operands_stack.stack_begin - 1 - n] = operands_stack.top();
+          operands_stack.data[operands_stack.stack_begin - 1 - n] =
+              operands_stack.top();
           break;
         } else if (h == 2) {
           // LD
-          operands_stack.push(operands_stack.data[operands_stack.stack_begin - 1 - n]);
+          operands_stack.push(
+              operands_stack.data[operands_stack.stack_begin - 1 - n]);
           break;
         } else if (h == 3) {
           // LDA
@@ -416,7 +454,8 @@ void interpret(FILE *f, bytefile *bf) {
           break;
         } else if (h == 2) {
           // LD
-          operands_stack.push(operands_stack.data[operands_stack.base_pointer + 1 + n]);
+          operands_stack.push(
+              operands_stack.data[operands_stack.base_pointer + 1 + n]);
           break;
         } else if (h == 3) {
           // LDA
@@ -434,12 +473,14 @@ void interpret(FILE *f, bytefile *bf) {
         if (h == 4) {
           // ST
           auto top = operands_stack.top();
-          auto stack_arg_index = operands_stack.base_pointer - 2 - operands_stack.n_args + n;
+          auto stack_arg_index =
+              operands_stack.base_pointer - 2 - operands_stack.n_args + n;
           operands_stack.data[stack_arg_index] = top;
           break;
         } else if (h == 2) {
           // LD
-          auto stack_arg_index = operands_stack.base_pointer - 2 - operands_stack.n_args + n;
+          auto stack_arg_index =
+              operands_stack.base_pointer - 2 - operands_stack.n_args + n;
           operands_stack.push(operands_stack.data[stack_arg_index]);
           break;
         } else if (h == 3) {
@@ -452,10 +493,20 @@ void interpret(FILE *f, bytefile *bf) {
         unsupported();
         break;
       }
-      case 3:
-        fprintf(f, "C(%d)", INT);
+      case 3: {
+        int index = INT;
+        fprintf(stderr, "C(%d)", index);
+        if (h == 4) { // ST
+          write_reference(create_reference(index, CAPTURED), operands_stack.top());
+          break;
+        } else if (h == 2) { // LD
+          // operands_stack.print_content();
+          operands_stack.push(*(u32*)create_reference(index, CAPTURED));
+          break;
+        }
         unsupported();
         break;
+      }
       default:
         FAIL;
       }
@@ -483,9 +534,13 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 2: {
+      case 2:
+      case 3: {
         int n_args = INT;
         int n_locals = INT;
+        if (l == 3) {
+          fprintf(stderr, "C");
+        }
         fprintf(stderr, "BEGIN\t%d ", n_args);
         fprintf(stderr, "%d", n_locals);
         operands_stack.push(BOX(operands_stack.n_args));
@@ -494,49 +549,61 @@ void interpret(FILE *f, bytefile *bf) {
         operands_stack.base_pointer = operands_stack.stack_pointer - 1;
         operands_stack.stack_pointer += (n_locals + 1);
         __gc_stack_bottom += (n_locals + 1);
-        break;  
+        break;
       }
 
-      case 3:
-        fprintf(f, "CBEGIN\t%d ", INT);
-        fprintf(f, "%d", INT);
-        unsupported();
-        break;
-
-      case 4:
-        fprintf(f, "CLOSURE\t0x%.8x", INT);
-        {
-          unsupported();
-          int n = INT;
-          for (int i = 0; i < n; i++) {
-            switch (BYTE) {
-            case 0:
-              fprintf(f, "G(%d)", INT);
-              unsupported();
-              break;
-            case 1:
-              fprintf(f, "L(%d)", INT);
-              unsupported();
-              break;
-            case 2:
-              fprintf(f, "A(%d)", INT);
-              unsupported();
-              break;
-            case 3:
-              fprintf(f, "C(%d)", INT);
-              unsupported();
-              break;
-            default:
-              FAIL;
-            }
+      case 4: {
+        int addr = INT;
+        fprintf(stderr, "CLOSURE\t0x%.8x", addr);
+        int n = INT;
+        for (int i = 0; i < n; i++) {
+          switch (BYTE) {
+          case 0: {
+            int index = INT;
+            fprintf(stderr, "G(%d)", index);
+            operands_stack.push((u32) * (u32 *)create_reference(index, GLOBAL));
+            break;
           }
-        };
+          case 1: {
+            int index = INT;
+            fprintf(stderr, "L(%d)", index);
+            operands_stack.push((u32) * (u32 *)create_reference(index, LOCAL));
+            break;
+          }
+          case 2: {
+            int index = INT;
+            fprintf(stderr, "A(%d)", index);
+            operands_stack.push((u32)(*((u32 *)create_reference(index, ARG))));
+            break;
+          }
+          case 3: {
+            int index = INT;
+            fprintf(stderr, "C(%d)", index);
+            operands_stack.push((u32)(*((u32 *)create_reference(index, CAPTURED))));
+            break;
+          }
+          default:
+            FAIL;
+          }
+        }
+        u32 v = (u32)myBclosure(n, operands_stack, (void *)addr);
+        operands_stack.push(v);
+        // unsupported();
         break;
+      };
 
-      case 5:
-        fprintf(f, "CALLC\t%d", INT);
-        unsupported();
+      case 5: {
+        int n_arg = INT;
+        fprintf(stderr, "CALLC\t%d", n_arg);
+        // if (n_arg == 0) {
+        u32 closure =
+            operands_stack.data[operands_stack.stack_pointer - 1 - n_arg];
+        u32 addr = (u32)(((i32 *)closure)[0]);
+        operands_stack.push(u32(ip));
+        ip = bf->code_ptr + addr;
+        in_closure = true;
         break;
+      }
 
       case 6: {
         int loc = INT;
@@ -547,16 +614,25 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 7:
-        fprintf(f, "TAG\t%s ", STRING);
-        fprintf(f, "%d", INT);
-        unsupported();
+      case 7: {
+        const char *name = STRING;
+        int n = INT;
+        fprintf(stderr, "TAG\t%s ", name);
+        fprintf(stderr, "%d", n);
+        u32 v =
+            Btag((void *)operands_stack.pop(), LtagHash((char *)name), BOX(n));
+        operands_stack.push(v);
         break;
+      }
 
-      case 8:
-        fprintf(f, "ARRAY\t%d", INT);
-        unsupported();
+      case 8: {
+        int size = INT;
+        fprintf(stderr, "ARRAY\t%d", size);
+        size_t is_array_n =
+            (size_t)Barray_patt((void *)operands_stack.pop(), BOX(size));
+        operands_stack.push(is_array_n);
         break;
+      }
 
       case 9:
         fprintf(f, "FAIL\t%d", INT);
@@ -574,19 +650,42 @@ void interpret(FILE *f, bytefile *bf) {
       break;
 
     case 6:
-      fprintf(f, "PATT\t%s", pats[l]);
-      unsupported();
+      fprintf(stderr, "PATT\t%s", pats[l]);
+      switch (l) {
+      case 0: { // =str
+        auto arg = (void *)operands_stack.pop();
+        auto eq = (void *)operands_stack.pop();
+        operands_stack.push((u32)Bstring_patt(arg, eq));
+        break;
+      }
+      case 1:
+      case 2:
+      case 3:
+      case 4:
+      case 5:
+      case 6: {
+        fprintf(stderr, "Here with l=%d\n", (int)l);
+        auto arg = operands_stack.pop();
+        auto function = pats_tags_matches[l];
+        operands_stack.push(function((void *)arg));
+        break;
+      }
+      // case 6: {
+      // operands_stack.push(Bclosure_tag_patt((void*)arg));
+      // break;
+      // }
+      default: {
+        unsupported();
+        break;
+      }
+      }
       break;
 
     case 7: {
       switch (l) {
       case 0: {
         fprintf(stderr, "CALL\tLread");
-        int result = 0;
-        // printf("> ");
-        fflush(stdout);
-        scanf("%d", &result);
-        operands_stack.push(BOX(result));
+        operands_stack.push(Lread());
         break;
       }
 
@@ -602,16 +701,17 @@ void interpret(FILE *f, bytefile *bf) {
       case 2: {
         fprintf(stderr, "CALL\tLlength");
         int value = (int)operands_stack.pop();
-        char* str = (char*) value;
-        int result = Llength((void*)value);
+        char *str = (char *)value;
+        int result = Llength((void *)value);
         operands_stack.push((u32)result);
         break;
       }
 
-      case 3:
-        fprintf(f, "CALL\tLstring");
-        unsupported();
+      case 3: {
+        fprintf(stderr, "CALL\tLstring");
+        operands_stack.push((u32)Lstring(((void *)operands_stack.pop())));
         break;
+      }
 
       case 4: {
         i32 n = INT;

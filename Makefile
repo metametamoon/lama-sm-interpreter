@@ -25,6 +25,14 @@ $(TESTS): %: %.lama build/vm
 	build/vm bytecodes/$@.bc > outs/$@.out # 2> /dev/null
 	diff outs/$@.out exps/$@.exp --strip-trailing-cr
 
+regression: build/vm
+	$(MAKE) -C regression
+
+
+.PHONY: regression-full
+
+regression-full: build/vm
+	$(MAKE) -C regression-full
 
 clean:
 	$(RM) *.s *.i *~ $(LOGS) $(TESTS)
