@@ -1,0 +1,12 @@
+{
+    "configurations": [
+        {
+            "type": "by-gdb",
+            "request": "launch",
+            "name": "Launch(gdb)",
+            "program": "${workspaceFolder}/build/vm",
+            "programArgs": "bytecodes/test01.bc",
+            "cwd": "${workspaceRoot}"
+        }
+    ]
+}
