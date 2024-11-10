@@ -38,8 +38,8 @@ using i32 = int32_t;
 
 #define BOXED(x) (((u32)(x)) & 0x0001)
 
-i32 constexpr N_GLOBAL = 100;
-i32 constexpr STACK_SIZE = 100000;
+static i32 constexpr N_GLOBAL = 100;
+static i32 constexpr STACK_SIZE = 100000;
 
 // stored on the stack (see std::array)
 template <typename T> struct stack {
@@ -145,7 +145,7 @@ void *__stop_custom_data;
 #define debug(...)
 #endif
 
-void unsupported() {
+static void unsupported() {
   fprintf(stderr, "unsupported");
   exit(-1);
 }
@@ -245,7 +245,7 @@ enum class Patt {
   LAST
 };
 
-u32 patts_match(void *arg, Patt label) {
+static inline u32 patts_match(void *arg, Patt label) {
   switch (label) {
   case Patt::STR_TAG:
     return Bstring_tag_patt(arg);
@@ -266,7 +266,7 @@ u32 patts_match(void *arg, Patt label) {
   }
 }
 
-i32 arithm_op(i32 l, i32 r, BinopLabel label) {
+static inline i32 arithm_op(i32 l, i32 r, BinopLabel label) {
   switch (label) {
   case BinopLabel::ADD:
     return l + r;
@@ -313,11 +313,11 @@ void interpret(FILE *f, bytefile *bf) {
   }
 
   char *ip = bf->code_ptr;
-  char const *const ops[] = {
+  static char const *const ops[] = {
       "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "!!"};
-  char const *const pats[] = {"=str", "#string", "#array", "#sexp",
+  static char const *const pats[] = {"=str", "#string", "#array", "#sexp",
                               "#ref", "#val",    "#fun"};
-  char const *const lds[] = {"LD", "LDA", "ST"};
+  static char const *const lds[] = {"LD", "LDA", "ST"};
   auto operands_stack = stack<u32>{};
   // pseudo first two args
   operands_stack.push(BOX(0));
