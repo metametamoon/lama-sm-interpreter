@@ -216,7 +216,7 @@ bytefile *read_file(char *fname) {
   return file;
 }
 
-enum BinopLabel {
+enum class BinopLabel {
   ADD = 0,
   SUB = 1,
   MUL = 2,
@@ -233,33 +233,66 @@ enum BinopLabel {
   BINOP_LAST
 };
 
+// doing my best to not clah with macros
+enum class Patt {
+  STR_EQ_TAG = 0,
+  STR_TAG = 1,
+  ARR_TAG = 2,
+  SEXPR_TAG = 3,
+  BOXED = 4,
+  UNBOXED = 5,
+  CLOS_TAG = 6,
+  LAST
+};
+
+u32 patts_match(void *arg, Patt label) {
+  switch (label) {
+  case Patt::STR_TAG:
+    return Bstring_tag_patt(arg);
+  case Patt::ARR_TAG:
+    return Barray_tag_patt(arg);
+  case Patt::SEXPR_TAG:
+    return Bsexp_tag_patt(arg);
+  case Patt::BOXED:
+    return Bboxed_patt(arg);
+  case Patt::UNBOXED:
+    return Bunboxed_patt(arg);
+  case Patt::CLOS_TAG:
+    return Bclosure_tag_patt(arg);
+  default:
+    fprintf(stderr, "bad patt specializer: %d\n", (i32)label);
+    unsupported();
+    return 0;
+  }
+}
+
 i32 arithm_op(i32 l, i32 r, BinopLabel label) {
   switch (label) {
-  case ADD:
+  case BinopLabel::ADD:
     return l + r;
-  case SUB:
+  case BinopLabel::SUB:
     return l - r;
-  case MUL:
+  case BinopLabel::MUL:
     return l * r;
-  case DIV:
+  case BinopLabel::DIV:
     return l / r;
-  case MOD:
+  case BinopLabel::MOD:
     return l % r;
-  case LT:
+  case BinopLabel::LT:
     return l < r;
-  case LEQ:
+  case BinopLabel::LEQ:
     return l <= r;
-  case GT:
+  case BinopLabel::GT:
     return l > r;
-  case GEQ:
+  case BinopLabel::GEQ:
     return l >= r;
-  case EQ:
+  case BinopLabel::EQ:
     return l == r;
-  case NEQ:
+  case BinopLabel::NEQ:
     return l != r;
-  case AND:
+  case BinopLabel::AND:
     return l && r;
-  case OR:
+  case BinopLabel::OR:
     return l || r;
   default:
     fprintf(stderr, "unsupported op label: %d", (i32)label);
@@ -284,11 +317,6 @@ void interpret(FILE *f, bytefile *bf) {
       "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "!!"};
   char const *const pats[] = {"=str", "#string", "#array", "#sexp",
                               "#ref", "#val",    "#fun"};
-  using tag_pattern = int (*)(void *);
-  auto pats_tags_matches = std::array<tag_pattern, 10>{
-      nullptr,     Bstring_tag_patt, Barray_tag_patt,   Bsexp_tag_patt,
-      Bboxed_patt, Bunboxed_patt,    Bclosure_tag_patt,
-  };
   char const *const lds[] = {"LD", "LDA", "ST"};
   auto operands_stack = stack<u32>{};
   // pseudo first two args
@@ -333,7 +361,7 @@ void interpret(FILE *f, bytefile *bf) {
     /* BINOP */
     case 0:
       debug(stderr, "BINOP\t%s", ops[l - 1]);
-      if (l - 1 < BINOP_LAST) {
+      if (l - 1 < (i32)BinopLabel::BINOP_LAST) {
         u32 t2 = UNBOX(operands_stack.pop());
         u32 t1 = UNBOX(operands_stack.pop());
         u32 result = (u32)arithm_op((i32)t1, (i32)t2, (BinopLabel)(l - 1));
@@ -616,32 +644,16 @@ void interpret(FILE *f, bytefile *bf) {
 
     case 6:
       debug(stderr, "PATT\t%s", pats[l]);
-      switch (l) {
-      case 0: { // =str
+      if (l == 0) { // =str
         auto arg = (void *)operands_stack.pop();
         auto eq = (void *)operands_stack.pop();
         operands_stack.push((u32)Bstring_patt(arg, eq));
-        break;
-      }
-      case 1:
-      case 2:
-      case 3:
-      case 4:
-      case 5:
-      case 6: {
+      } else if (l < (i32)Patt::LAST) {
         auto arg = operands_stack.pop();
-        auto function = pats_tags_matches[l];
-        operands_stack.push(function((void *)arg));
-        break;
-      }
-      // case 6: {
-      // operands_stack.push(Bclosure_tag_patt((void*)arg));
-      // break;
-      // }
-      default: {
+        operands_stack.push(patts_match((void *)arg, (Patt)l));
+      } else {
+        fprintf(stderr, "Unsupported patt specializer: %d", l);
         unsupported();
-        break;
-      }
       }
       break;
 
