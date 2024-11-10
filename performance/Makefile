@@ -9,7 +9,7 @@ check: $(TESTS)
 $(TESTS): %: %.lama
 	@echo $@
 	$(LAMAC)  $<
-	`which time` -f "$@\t%U" ./$@
+	cat empty | `which time` -f "$@\t%U" $(LAMAC) -i $@.lama
 	$(LAMAC) -b $<
 	`which time` -f "$@\t%U" ../build/vm-opt $@.bc
 
