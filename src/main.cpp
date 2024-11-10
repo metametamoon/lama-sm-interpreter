@@ -137,7 +137,7 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #define debug(...) fprintf(__VA_ARGS__)
@@ -173,12 +173,6 @@ char *get_public_name(bytefile *f, int i) {
 
 /* Gets an offset for a publie symbol */
 int get_public_offset(bytefile *f, int i) { return f->public_ptr[i * 2 + 1]; }
-
-// i32 arithm_op(i32 l, i32 r, char label) {
-//   switch (label) {
-
-//   }
-// }
 
 /* Reads a binary bytecode file by name and unpacks it */
 bytefile *read_file(char *fname) {
@@ -222,6 +216,58 @@ bytefile *read_file(char *fname) {
   return file;
 }
 
+enum BinopLabel {
+  ADD = 0,
+  SUB = 1,
+  MUL = 2,
+  DIV = 3,
+  MOD = 4,
+  LT = 5,
+  LEQ = 6,
+  GT = 7,
+  GEQ = 8,
+  EQ = 9,
+  NEQ = 10,
+  AND = 11,
+  OR = 12,
+  BINOP_LAST
+};
+
+i32 arithm_op(i32 l, i32 r, BinopLabel label) {
+  switch (label) {
+  case ADD:
+    return l + r;
+  case SUB:
+    return l - r;
+  case MUL:
+    return l * r;
+  case DIV:
+    return l / r;
+  case MOD:
+    return l % r;
+  case LT:
+    return l < r;
+  case LEQ:
+    return l <= r;
+  case GT:
+    return l > r;
+  case GEQ:
+    return l >= r;
+  case EQ:
+    return l == r;
+  case NEQ:
+    return l != r;
+  case AND:
+    return l && r;
+  case OR:
+    return l || r;
+  default:
+    fprintf(stderr, "unsupported op label: %d", (i32)label);
+    exit(-1);
+    return -1;
+  }
+}
+
 /* Disassembles the bytecode pool */
 void interpret(FILE *f, bytefile *bf) {
 #define INT (ip += sizeof(int), *(int *)(ip - sizeof(int)))
@@ -234,23 +280,8 @@ void interpret(FILE *f, bytefile *bf) {
   }
 
   char *ip = bf->code_ptr;
-  char const *ops[] = {
+  char const *const ops[] = {
       "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "!!"};
-  auto ops_array = std::array{
-      +[](u32 l, u32 r) -> u32 { return l + r; },
-      +[](u32 l, u32 r) -> u32 { return l - r; },
-      +[](u32 l, u32 r) -> u32 { return l * r; },
-      +[](u32 l, u32 r) -> u32 { return l / r; },
-      +[](u32 l, u32 r) -> u32 { return l % r; },
-      +[](u32 l, u32 r) -> u32 { return i32(l) < i32(r); },
-      +[](u32 l, u32 r) -> u32 { return i32(l) <= i32(r); },
-      +[](u32 l, u32 r) -> u32 { return i32(l) > i32(r); },
-      +[](u32 l, u32 r) -> u32 { return i32(l) >= i32(r); },
-      +[](u32 l, u32 r) -> u32 { return i32(l) == i32(r); },
-      +[](u32 l, u32 r) -> u32 { return i32(l) != i32(r); },
-      +[](u32 l, u32 r) -> u32 { return l && r; },
-      +[](u32 l, u32 r) -> u32 { return l || r; },
-  };
   char const *const pats[] = {"=str", "#string", "#array", "#sexp",
                               "#ref", "#val",    "#fun"};
   using tag_pattern = int (*)(void *);
@@ -293,7 +324,6 @@ void interpret(FILE *f, bytefile *bf) {
   bool in_closure = false;
 
   do {
-    operands_stack.print_ptrs();
     char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
@@ -303,10 +333,10 @@ void interpret(FILE *f, bytefile *bf) {
     /* BINOP */
     case 0:
       debug(stderr, "BINOP\t%s", ops[l - 1]);
-      if (l - 1 <= ops_array.size()) {
+      if (l - 1 < BINOP_LAST) {
         u32 t2 = UNBOX(operands_stack.pop());
         u32 t1 = UNBOX(operands_stack.pop());
-        u32 result = ops_array[l - 1](t1, t2);
+        u32 result = (u32)arithm_op((i32)t1, (i32)t2, (BinopLabel)(l - 1));
         operands_stack.push(BOX(result));
       } else {
         unsupported();
@@ -367,7 +397,7 @@ void interpret(FILE *f, bytefile *bf) {
           u32 ret_value = operands_stack.pop(); // preserve the boxing kind
           u32 top_n_args = operands_stack.n_args;
           __gc_stack_top = operands_stack.base_pointer - 1;
-          operands_stack.base_pointer = (size_t*)operands_stack.pop();
+          operands_stack.base_pointer = (size_t *)operands_stack.pop();
           operands_stack.n_args = UNBOX(operands_stack.pop());
           u32 ret_ip = operands_stack.pop();
           __gc_stack_top += top_n_args;

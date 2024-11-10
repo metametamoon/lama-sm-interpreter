@@ -36,7 +36,7 @@ $(TESTS): %: %.lama build/vm
 	diff outs/$@.out exps/$@.exp --strip-trailing-cr
 
 
-benchmark: build/vm
+benchmark: build/vm-opt
 	$(MAKE) -C performance
 
 .PHONY: regression-full
