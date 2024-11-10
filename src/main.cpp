@@ -287,7 +287,7 @@ void interpret(FILE *f, bytefile *bf) {
   bool in_closure = false;
 
   do {
-    char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
+    unsigned char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
     case 15:
