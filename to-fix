@@ -1,0 +1,20 @@
+TODO:
+1. compare with lamac -i
+3. better diagnostics
+4. fix unsigned division/mod
+5. insert static and const wherever logical
+6. remove array function
+7. fix stack name
+10. insert enums
+11. remove code dublicating in l -> kind
+12. mark local functions as `static`
+13. critical functions: static inline
+
+IN-PROGRESS:
+
+
+DONE:
+8. consider globals position
+2. rewrite stack
+14. insert consts [dublicate]
+9. fix char in parsing

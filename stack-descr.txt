@@ -33,3 +33,19 @@ arg2
 arg1
 arg0
 [opt]closure
+
+after rewrite:
+
+[opt]closure
+arg0
+arg1
+arg2
+ret_addr
+old_nargs
+old_rbp <- rbp
+loc_0
+loc_1
+loc_2
+..
+loc_{N-1}
+___ <- rsp 

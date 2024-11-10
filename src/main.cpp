@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -40,48 +41,54 @@ using i32 = int32_t;
 // #define UNBOX(x) (((u32)(x)) >> 1)
 // #define BOX(x) ((((u32)(x)) << 1) | 0x0001)
 
+i32 constexpr N_GLOBAL = 100;
+i32 constexpr STACK_SIZE = 100000;
+
+// stored on the stack (see std::array)
 template <typename T> struct stack {
-  std::array<T, 100000> data;
-  u32 stack_begin = 100;
-  u32 stack_pointer = stack_begin;
-  u32 base_pointer = stack_begin;
+  std::array<T, STACK_SIZE> data; // zero-initialized on the stack
+  size_t *stack_begin = nullptr;
+  // size_t*& stack_pointer;
+  // size_t* stack_pointer = nullptr; replaced by __gc_stack_top
+  size_t *base_pointer = nullptr;
   u32 n_args = 2; // default
 
   stack() {
-    __gc_stack_bottom = (size_t *)(data.data() + stack_pointer);
-    __gc_stack_top = (size_t *)(data.data());
+    __gc_stack_bottom = (size_t *)(data.data() + STACK_SIZE);
+    stack_begin = __gc_stack_bottom - N_GLOBAL;
+    base_pointer = stack_begin;
+    __gc_stack_top = stack_begin;
   }
 
   void push(T value) {
-    __gc_stack_bottom++;
-    data[stack_pointer++] = value;
-    assert((void *)__gc_stack_bottom == (void *)(data.data() + stack_pointer));
+    *(__gc_stack_top--) = value;
+    assert(data.data() < __gc_stack_top);
   }
 
   T pop() {
-    if (stack_pointer == 0) {
+    if (__gc_stack_top == stack_begin) {
       fprintf(stderr, "negative stack\n");
       exit(-1);
     }
-    __gc_stack_bottom--;
-    return data[--stack_pointer];
+    return *(++__gc_stack_top);
   }
-  T top() { return data[stack_pointer - 1]; }
+  T top() { return *(__gc_stack_top + 1); }
 
   void print_ptrs() {
-    fprintf(stderr, "rbp=%d rsp=%d\n", base_pointer, stack_pointer);
+    fprintf(stderr, "rbp=%d rsp=%d\n", __gc_stack_bottom - base_pointer,
+            __gc_stack_bottom - __gc_stack_top);
   }
 
   void print_content() {
     print_ptrs();
-    for (i32 i = stack_pointer; i >= 0; --i) {
-      fprintf(stderr, "%.2d: ", i);
-      if (BOXED(data[i])) {
-        fprintf(stderr, "B(%u)\n", UNBOX(data[i]));
-      } else {
-        fprintf(stderr, "%x\n", data[i]);
-      }
-    }
+    // for (i32 i = stack_pointer; i >= 0; --i) {
+    //   fprintf(stderr, "%.2d: ", i);
+    //   if (BOXED(data[i])) {
+    //     fprintf(stderr, "B(%u)\n", UNBOX(data[i]));
+    //   } else {
+    //     fprintf(stderr, "%x\n", data[i]);
+    //   }
+    // }
   }
 };
 
@@ -134,7 +141,7 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
-// #define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define debug(...) fprintf(__VA_ARGS__)
@@ -251,9 +258,6 @@ void interpret(FILE *f, bytefile *bf) {
   };
   char const *const lds[] = {"LD", "LDA", "ST"};
   auto operands_stack = stack<u32>{};
-  assert((void *)__gc_stack_bottom ==
-         (void *)(operands_stack.data.data() + operands_stack.stack_pointer));
-  __gc_stack_bottom = operands_stack.data.data() + operands_stack.stack_pointer;
   // pseudo first two args
   operands_stack.push(BOX(0));
   operands_stack.push(BOX(0));
@@ -263,17 +267,17 @@ void interpret(FILE *f, bytefile *bf) {
   u32 const CAPTURED = 4;
   auto create_reference = [&](u32 index, u32 kind) -> u32 {
     if (kind == GLOBAL) {
-      return (u32)&operands_stack.data[operands_stack.stack_begin - 1 - index];
+      return (u32)(operands_stack.stack_begin + 1 + index);
     } else if (kind == LOCAL) {
-      return (u32)&operands_stack.data[operands_stack.base_pointer + 1 + index];
+      return (u32)(operands_stack.base_pointer - 1 - index);
     } else if (kind == ARG) {
-      auto stack_arg_index =
-          operands_stack.base_pointer - 2 - operands_stack.n_args + index;
-      return (u32)&operands_stack.data[stack_arg_index];
+      auto result =
+          operands_stack.base_pointer + 2 + operands_stack.n_args - index;
+      return (u32)result;
     } else if (kind == CAPTURED) {
-      auto closure_index =
-          operands_stack.base_pointer - 2 - operands_stack.n_args - 1;
-      u32 *closure = (u32 *)operands_stack.data[closure_index];
+      auto closure_ptr =
+          operands_stack.base_pointer + 2 + operands_stack.n_args + 1;
+      u32 *closure = (u32 *)*closure_ptr;
       return (u32)&closure[1 + index];
     } else {
       unsupported();
@@ -287,7 +291,8 @@ void interpret(FILE *f, bytefile *bf) {
   bool in_closure = false;
 
   do {
-    unsigned char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
+    operands_stack.print_ptrs();
+    char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
     case 15:
@@ -356,19 +361,17 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 6: {
         debug(stderr, "END");
-        if (operands_stack.base_pointer != operands_stack.stack_begin + 3) {
+        if (operands_stack.base_pointer != operands_stack.stack_begin - 3) {
           u32 ret_value = operands_stack.pop(); // preserve the boxing kind
           u32 top_n_args = operands_stack.n_args;
-          operands_stack.stack_pointer = operands_stack.base_pointer + 1;
-          operands_stack.base_pointer = UNBOX(operands_stack.pop());
+          __gc_stack_top = operands_stack.base_pointer - 1;
+          operands_stack.base_pointer = (size_t*)operands_stack.pop();
           operands_stack.n_args = UNBOX(operands_stack.pop());
           u32 ret_ip = operands_stack.pop();
-          operands_stack.stack_pointer -= top_n_args;
+          __gc_stack_top += top_n_args;
           if (in_closure) {
-            operands_stack.stack_pointer -= 1;
+            operands_stack.pop();
           }
-          __gc_stack_bottom =
-              operands_stack.data.data() + operands_stack.stack_pointer;
           operands_stack.push(ret_value);
           ip = (char *)ret_ip;
           in_closure = false;
@@ -386,10 +389,6 @@ void interpret(FILE *f, bytefile *bf) {
 
       case 8:
         debug(stderr, "DROP");
-        if (operands_stack.stack_pointer == 0) {
-          printf("Error: negative stack\n");
-          exit(-1);
-        }
         operands_stack.pop();
         break;
 
@@ -503,11 +502,10 @@ void interpret(FILE *f, bytefile *bf) {
         debug(stderr, "BEGIN\t%d ", n_args);
         debug(stderr, "%d", n_locals);
         operands_stack.push(BOX(operands_stack.n_args));
-        operands_stack.push(BOX(operands_stack.base_pointer));
+        operands_stack.push((u32)operands_stack.base_pointer);
         operands_stack.n_args = n_args;
-        operands_stack.base_pointer = operands_stack.stack_pointer - 1;
-        operands_stack.stack_pointer += (n_locals + 1);
-        __gc_stack_bottom += (n_locals + 1);
+        operands_stack.base_pointer = __gc_stack_top + 1;
+        __gc_stack_top -= (n_locals + 1);
         break;
       }
 
@@ -556,8 +554,7 @@ void interpret(FILE *f, bytefile *bf) {
         int n_arg = INT;
         debug(stderr, "CALLC\t%d", n_arg);
         // if (n_arg == 0) {
-        u32 closure =
-            operands_stack.data[operands_stack.stack_pointer - 1 - n_arg];
+        u32 closure = *(__gc_stack_top + 1 + n_arg);
         u32 addr = (u32)(((i32 *)closure)[0]);
         operands_stack.push(u32(ip));
         ip = bf->code_ptr + addr;
