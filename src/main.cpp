@@ -137,7 +137,7 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
-// #define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define debug(...) fprintf(__VA_ARGS__)
@@ -164,7 +164,18 @@ struct __attribute__((packed)) bytefile {
 };
 
 /* Gets a string from a string table by an index */
-char *get_string(bytefile *f, int pos) { return &f->string_ptr[pos]; }
+char *get_string(bytefile *f, int pos) {
+  // validate its is an ok string
+  char* ptr = &f->string_ptr[pos];
+  i32 dist = ptr - f->string_ptr;
+  i32 left_in_str_section = f->stringtab_size - dist;
+  i32 len = strlen(ptr);
+  if (len > left_in_str_section) {
+    fprintf(stderr, "Bad string read at %x (string did not terminate)\n", left_in_str_section);
+    exit(-1);
+  }
+  return ptr; 
+}
 
 /* Gets a name for a public symbol */
 char *get_public_name(bytefile *f, int i) {
