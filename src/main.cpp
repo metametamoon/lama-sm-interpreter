@@ -166,15 +166,16 @@ struct __attribute__((packed)) bytefile {
 /* Gets a string from a string table by an index */
 char *get_string(bytefile *f, int pos) {
   // validate its is an ok string
-  char* ptr = &f->string_ptr[pos];
+  char *ptr = &f->string_ptr[pos];
   i32 dist = ptr - f->string_ptr;
   i32 left_in_str_section = f->stringtab_size - dist;
   i32 len = strlen(ptr);
   if (len > left_in_str_section) {
-    fprintf(stderr, "Bad string read at %x (string did not terminate)\n", left_in_str_section);
+    fprintf(stderr, "Bad string read at %x (string did not terminate)\n",
+            left_in_str_section);
     exit(-1);
   }
-  return ptr; 
+  return ptr;
 }
 
 /* Gets a name for a public symbol */
@@ -183,7 +184,13 @@ char *get_public_name(bytefile *f, int i) {
 }
 
 /* Gets an offset for a publie symbol */
-int get_public_offset(bytefile *f, int i) { return f->public_ptr[i * 2 + 1]; }
+int get_public_offset(bytefile *f, int i) {
+  if (!(i < f->public_symbols_number)) {
+    fprintf(stderr, "Trying to read out of bounds public member at %d", i);
+    exit(-1);
+  }
+  return f->public_ptr[i * 2 + 1];
+}
 
 /* Reads a binary bytecode file by name and unpacks it */
 bytefile *read_file(char *fname) {
@@ -213,6 +220,20 @@ bytefile *read_file(char *fname) {
 
   if (size != fread(&file->stringtab_size, 1, size, f)) {
     printf("%s\n", strerror(errno));
+    exit(-1);
+  }
+
+  if (file->public_symbols_number < 0) {
+    fprintf(stderr, "unreasonable number of public symbols (an error?): %d\n",
+            file->public_symbols_number);
+    exit(-1);
+  } else if (file->stringtab_size < 0) {
+    fprintf(stderr, "unreasonable size of stringtab (an error?): %d\n",
+            file->public_symbols_number);
+    exit(-1);
+  } else if (file->global_area_size < 0) {
+    fprintf(stderr, "unreasonable size of global aread (an error?): %d\n",
+            file->public_symbols_number);
     exit(-1);
   }
 
@@ -327,7 +348,7 @@ void interpret(FILE *f, bytefile *bf) {
   static char const *const ops[] = {
       "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "!!"};
   static char const *const pats[] = {"=str", "#string", "#array", "#sexp",
-                              "#ref", "#val",    "#fun"};
+                                     "#ref", "#val",    "#fun"};
   static char const *const lds[] = {"LD", "LDA", "ST"};
   auto operands_stack = stack<u32>{};
   // pseudo first two args
@@ -378,7 +399,7 @@ void interpret(FILE *f, bytefile *bf) {
         u32 result = (u32)arithm_op((i32)t1, (i32)t2, (BinopLabel)(l - 1));
         operands_stack.push(BOX(result));
       } else {
-        unsupported();
+        FAIL;
       }
       break;
 
@@ -409,10 +430,14 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 3:
+      case 3: {
         debug(f, "STI");
-        unsupported();
+        u32 value = operands_stack.pop();
+        u32 reference = operands_stack.pop();
+        write_reference(reference, value);
+        operands_stack.push(value);
         break;
+      }
 
       case 4: {
         debug(stderr, "STA");
@@ -430,8 +455,13 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
+      case 7:
       case 6: {
-        debug(stderr, "END");
+        if (h == 7) {
+          debug(stderr, "RET");
+        } else {
+          debug(stderr, "END");
+        }
         if (operands_stack.base_pointer != operands_stack.stack_begin - 3) {
           u32 ret_value = operands_stack.pop(); // preserve the boxing kind
           u32 top_n_args = operands_stack.n_args;
@@ -453,11 +483,6 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 7:
-        debug(stderr, "RET");
-        unsupported();
-        break;
-
       case 8:
         debug(stderr, "DROP");
         operands_stack.pop();
@@ -470,10 +495,14 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 10:
+      case 10: {
         debug(f, "SWAP");
-        unsupported();
+        auto fst = operands_stack.pop();
+        auto snd = operands_stack.pop();
+        operands_stack.push(fst);
+        operands_stack.push(snd);
         break;
+      }
 
       case 11: {
         debug(stderr, "ELEM");
@@ -590,7 +619,6 @@ void interpret(FILE *f, bytefile *bf) {
         }
         u32 v = (u32)myBclosure(n, operands_stack, (void *)addr);
         operands_stack.push(v);
-        // unsupported();
         break;
       };
 
@@ -639,7 +667,7 @@ void interpret(FILE *f, bytefile *bf) {
       case 9:
         fprintf(f, "FAIL\t%d", INT);
         fprintf(f, "%d", INT);
-        unsupported();
+        exit(-1);
         break;
 
       case 10: {
@@ -664,7 +692,7 @@ void interpret(FILE *f, bytefile *bf) {
         operands_stack.push(patts_match((void *)arg, (Patt)l));
       } else {
         fprintf(stderr, "Unsupported patt specializer: %d", l);
-        unsupported();
+        FAIL;
       }
       break;
 
