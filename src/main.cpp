@@ -10,8 +10,8 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <string.h>
-// #include "runtime/gc.h"
 #include "runtime/runtime_common.h"
+
 extern "C" void *Belem(void *p, int i);
 extern "C" void *Bsta(void *v, int i, void *x);
 extern "C" void *Bstring(void *p);
@@ -137,7 +137,7 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #define debug(...) fprintf(__VA_ARGS__)
