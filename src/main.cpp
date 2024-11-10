@@ -36,10 +36,7 @@ extern "C" void __init();
 using u32 = uint32_t;
 using i32 = int32_t;
 
-// #define UNBOXED(x) (((u32)(x)) & 0x0001)
 #define BOXED(x) (((u32)(x)) & 0x0001)
-// #define UNBOX(x) (((u32)(x)) >> 1)
-// #define BOX(x) ((((u32)(x)) << 1) | 0x0001)
 
 i32 constexpr N_GLOBAL = 100;
 i32 constexpr STACK_SIZE = 100000;
@@ -48,7 +45,6 @@ i32 constexpr STACK_SIZE = 100000;
 template <typename T> struct stack {
   std::array<T, STACK_SIZE> data; // zero-initialized on the stack
   size_t *stack_begin = nullptr;
-  // size_t*& stack_pointer;
   // size_t* stack_pointer = nullptr; replaced by __gc_stack_top
   size_t *base_pointer = nullptr;
   u32 n_args = 2; // default
@@ -177,6 +173,12 @@ char *get_public_name(bytefile *f, int i) {
 
 /* Gets an offset for a publie symbol */
 int get_public_offset(bytefile *f, int i) { return f->public_ptr[i * 2 + 1]; }
+
+// i32 arithm_op(i32 l, i32 r, char label) {
+//   switch (label) {
+
+//   }
+// }
 
 /* Reads a binary bytecode file by name and unpacks it */
 bytefile *read_file(char *fname) {
@@ -419,17 +421,8 @@ void interpret(FILE *f, bytefile *bf) {
       break;
     case 2: { // LD
       debug(stderr, "%s\t", lds[h - 2]);
-      i32 index = INT;
-      u32 kind = -1;
-      if (l == 0) {
-        kind = GLOBAL;
-      } else if (l == 1) {
-        kind = LOCAL;
-      } else if (l == 2) {
-        kind = ARG;
-      } else if (l == 3) {
-        kind = CAPTURED;
-      }
+      i32 const index = INT;
+      u32 kind = l + 1;
       auto value = *(u32 *)create_reference(index, kind);
       operands_stack.push(value);
       break;
@@ -437,16 +430,7 @@ void interpret(FILE *f, bytefile *bf) {
     case 4: { // ST
       debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
-      u32 kind = -1;
-      if (l == 0) {
-        kind = GLOBAL;
-      } else if (l == 1) {
-        kind = LOCAL;
-      } else if (l == 2) {
-        kind = ARG;
-      } else if (l == 3) {
-        kind = CAPTURED;
-      }
+      u32 kind = l + 1;
       auto top = operands_stack.top();
       write_reference(create_reference(index, kind), top);
       break;
@@ -454,16 +438,7 @@ void interpret(FILE *f, bytefile *bf) {
     case 3: {
       debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
-      u32 kind = -1;
-      if (l == 0) {
-        kind = GLOBAL;
-      } else if (l == 1) {
-        kind = LOCAL;
-      } else if (l == 2) {
-        kind = ARG;
-      } else if (l == 3) {
-        kind = CAPTURED;
-      }
+      u32 kind = l + 1;
       auto ref = create_reference(index, kind);
       operands_stack.push(ref);
       operands_stack.push(ref);

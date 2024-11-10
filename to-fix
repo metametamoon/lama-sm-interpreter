@@ -4,7 +4,6 @@ TODO:
 4. fix unsigned division/mod
 5. insert static and const wherever logical
 6. remove array function
-7. fix stack name
 10. insert enums
 11. remove code dublicating in l -> kind
 12. mark local functions as `static`
@@ -14,6 +13,7 @@ IN-PROGRESS:
 
 
 DONE:
+7. fix stack name
 8. consider globals position
 2. rewrite stack
 14. insert consts [dublicate]

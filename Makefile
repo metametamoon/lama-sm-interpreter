@@ -35,8 +35,6 @@ $(TESTS): %: %.lama build/vm
 	build/vm bytecodes/$@.bc > outs/$@.out # 2> /dev/null
 	diff outs/$@.out exps/$@.exp --strip-trailing-cr
 
-regression: build/vm
-	$(MAKE) -C regression
 
 benchmark: build/vm
 	$(MAKE) -C performance
