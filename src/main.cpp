@@ -580,6 +580,7 @@ void interpret(FILE *f, bytefile *bf) {
         operands_stack.n_args = n_args;
         operands_stack.base_pointer = __gc_stack_top + 1;
         __gc_stack_top -= (n_locals + 1);
+        memset((void*)__gc_stack_top, 0, (n_locals + 1) * sizeof(size_t));
         break;
       }
 
