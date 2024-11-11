@@ -334,6 +334,67 @@ void print_location(bytefile *bf, char *next_ip) {
   fprintf(stderr, "at 0x%.8x:\n", unsigned((next_ip - 4) - bf->code_ptr - 1));
 }
 
+using u8 = std::uint8_t;
+static u8 constexpr HBINOP = 0;
+static u8 constexpr HMISC1 = 1;
+static u8 constexpr HLD = 2;
+static u8 constexpr HLDA = 3;
+static u8 constexpr HST = 4;
+static u8 constexpr HMISC2 = 5;
+static u8 constexpr HPATT = 6;
+static u8 constexpr HCALL = 7;
+
+enum class HCode : u8 {
+  BINOP = 0,
+  MISC1 = 1,
+  LD = 2,
+  LDA = 3,
+  ST = 4,
+  MISC2 = 5,
+  PATT = 6,
+  CALL = 7,
+  STOP = 15,
+};
+
+enum class Misc1LCode : u8 {
+  CONST = 0,
+  STR = 1,
+  SEXP = 2,
+  STI = 3,
+  STA = 4,
+  JMP = 5,
+  END = 6,
+  RET = 7,
+  DROP = 8,
+  DUP = 9,
+  SWAP = 10,
+  ELEM = 11,
+};
+
+enum class Misc2LCode : u8 {
+  CJMPZ = 0,
+  CJMPNZ = 1,
+  BEGIN = 2,
+  CBEGIN = 3,
+  CLOSURE = 4,
+  CALLC = 5,
+  CALL = 6,
+  TAG = 7,
+  ARRAY = 8,
+  FAILURE = 9,
+  LINE = 10,
+  ELEM = 11,
+};
+
+
+enum class Call : u8 {
+  READ = 0,
+  WRITE = 1,
+  LLENGTH = 2,
+  LSTRING = 3,
+  BARRAY = 4,
+};
+
 /* Disassembles the bytecode pool */
 void interpret(FILE *f, bytefile *bf) {
 #define INT (ip += sizeof(int), *(int *)(ip - sizeof(int)))
@@ -384,8 +445,8 @@ void interpret(FILE *f, bytefile *bf) {
   __init();
   bool in_closure = false;
   auto check_is_begin = [](char *ip) {
-    unsigned char x = *ip;
-    unsigned char h = (x & 0xF0) >> 4, l = x & 0x0F;
+    u8 x = *ip;
+    u8 h = (x & 0xF0) >> 4, l = x & 0x0F;
     return h == 5 && (l == 3 || l == 2);
   };
 
@@ -394,14 +455,13 @@ void interpret(FILE *f, bytefile *bf) {
       fprintf(stderr, "execution unexpectedly got out of code section\n");
       exit(-1);
     }
-    unsigned char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
+    u8 x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
-    switch (h) {
-    case 15:
+    switch ((HCode)h) {
+    case HCode::STOP:
       goto stop;
 
-    /* BINOP */
-    case 0:
+    case HCode::BINOP: {
       debug(stderr, "BINOP\t%s", ops[l - 1]);
       if (l - 1 < (i32)BinopLabel::BINOP_LAST) {
         u32 t2 = UNBOX(operands_stack.pop());
@@ -412,17 +472,18 @@ void interpret(FILE *f, bytefile *bf) {
         FAIL;
       }
       break;
+    }
 
-    case 1:
-      switch (l) {
-      case 0: {
+    case HCode::MISC1: {
+      switch ((Misc1LCode)l) {
+      case Misc1LCode::CONST: {
         auto arg = INT;
         operands_stack.push(BOX(arg));
         debug(stderr, "CONST\t%d", arg);
         break;
       }
 
-      case 1: {
+      case Misc1LCode::STR: {
         char *string = STRING;
         debug(stderr, "STRING\t%s", string);
         char *obj_string = (char *)Bstring((void *)string);
@@ -430,7 +491,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 2: {
+      case Misc1LCode::SEXP: {
         char *tag = STRING;
         int n = INT;
         debug(stderr, "SEXP\t%s ", tag);
@@ -440,7 +501,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 3: {
+      case Misc1LCode::STI: {
         debug(f, "STI");
         u32 value = operands_stack.pop();
         u32 reference = operands_stack.pop();
@@ -449,7 +510,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 4: {
+      case Misc1LCode::STA: {
         debug(stderr, "STA");
         auto value = (void *)operands_stack.pop();
         auto i = (int)operands_stack.pop();
@@ -458,7 +519,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 5: {
+      case Misc1LCode::JMP: {
         auto jump_location = INT;
         debug(stderr, "JMP\t0x%.8x", jump_location);
         char *old_ip = ip;
@@ -472,8 +533,8 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 7:
-      case 6: {
+      case Misc1LCode::END:
+      case Misc1LCode::RET: {
         if (h == 7) {
           debug(stderr, "RET");
         } else {
@@ -500,19 +561,19 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 8:
+      case Misc1LCode::DROP:
         debug(stderr, "DROP");
         operands_stack.pop();
         break;
 
-      case 9: {
+      case Misc1LCode::DUP: {
         debug(stderr, "DUP");
         u32 v = operands_stack.top();
         operands_stack.push(v);
         break;
       }
 
-      case 10: {
+      case Misc1LCode::SWAP: {
         debug(f, "SWAP");
         auto fst = operands_stack.pop();
         auto snd = operands_stack.pop();
@@ -521,7 +582,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 11: {
+      case Misc1LCode::ELEM: {
         debug(stderr, "ELEM");
         auto index = (int)operands_stack.pop();
         auto obj = (void *)operands_stack.pop();
@@ -534,7 +595,8 @@ void interpret(FILE *f, bytefile *bf) {
         FAIL;
       }
       break;
-    case 2: { // LD
+    }
+    case HCode::LD: { // LD
       debug(stderr, "%s\t", lds[h - 2]);
       i32 const index = INT;
       u32 kind = l + 1;
@@ -542,15 +604,7 @@ void interpret(FILE *f, bytefile *bf) {
       operands_stack.push(value);
       break;
     }
-    case 4: { // ST
-      debug(stderr, "%s\t", lds[h - 2]);
-      i32 index = INT;
-      u32 kind = l + 1;
-      auto top = operands_stack.top();
-      write_reference(create_reference(index, kind), top);
-      break;
-    }
-    case 3: {
+    case HCode::LDA: {
       debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
       u32 kind = l + 1;
@@ -559,10 +613,18 @@ void interpret(FILE *f, bytefile *bf) {
       operands_stack.push(ref);
       break;
     }
+    case HCode::ST: { // ST
+      debug(stderr, "%s\t", lds[h - 2]);
+      i32 index = INT;
+      u32 kind = l + 1;
+      auto top = operands_stack.top();
+      write_reference(create_reference(index, kind), top);
+      break;
+    }
 
-    case 5:
-      switch (l) {
-      case 0: {
+    case HCode::MISC2: {
+      switch ((Misc2LCode)l) {
+      case Misc2LCode::CJMPZ: {
         auto jump_location = INT;
         debug(stderr, "CJMPz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
@@ -578,7 +640,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 1: {
+      case Misc2LCode::CJMPNZ: {
         auto jump_location = INT;
         debug(stderr, "CJMPnz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
@@ -594,8 +656,8 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 2:
-      case 3: {
+      case Misc2LCode::BEGIN:
+      case Misc2LCode::CBEGIN: {
         int n_args = INT;
         int n_locals = INT;
         if (l == 3) {
@@ -612,7 +674,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 4: {
+      case Misc2LCode::CLOSURE: {
         int addr = INT;
         debug(stderr, "CLOSURE\t0x%.8x", addr);
         if (addr < 0 || addr > ((char *)bf->code_end - bf->code_ptr)) {
@@ -662,7 +724,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       };
 
-      case 5: {
+      case Misc2LCode::CALLC: {
         int n_arg = INT;
         debug(stderr, "CALLC\t%d", n_arg);
         // if (n_arg == 0) {
@@ -674,7 +736,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 6: {
+      case Misc2LCode::CALL: {
         int loc = INT;
         int n = INT;
         debug(stderr, "CALL\t0x%.8x ", loc);
@@ -689,7 +751,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 7: {
+      case Misc2LCode::TAG: {
         const char *name = STRING;
         int n = INT;
         debug(stderr, "TAG\t%s ", name);
@@ -700,7 +762,7 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 8: {
+      case Misc2LCode::ARRAY: {
         int size = INT;
         debug(stderr, "ARRAY\t%d", size);
         size_t is_array_n =
@@ -709,13 +771,13 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 9:
+      case Misc2LCode::FAILURE:
         fprintf(f, "FAIL\t%d", INT);
         fprintf(f, "%d", INT);
         exit(-1);
         break;
 
-      case 10: {
+      case Misc2LCode::LINE: {
         int line = INT;
         debug(stderr, "LINE\t%d", line);
         break;
@@ -725,8 +787,8 @@ void interpret(FILE *f, bytefile *bf) {
         FAIL;
       }
       break;
-
-    case 6:
+    }
+    case HCode::PATT: {
       debug(stderr, "PATT\t%s", pats[l]);
       if (l == 0) { // =str
         auto arg = (void *)operands_stack.pop();
@@ -740,23 +802,23 @@ void interpret(FILE *f, bytefile *bf) {
         FAIL;
       }
       break;
-
-    case 7: {
-      switch (l) {
-      case 0: {
+    }
+    case HCode::CALL: {
+      switch ((Call)l) {
+      case Call::READ: {
         debug(stderr, "CALL\tLread");
         operands_stack.push(Lread());
         break;
       }
 
-      case 1: {
+      case Call::WRITE: {
         u32 value = UNBOX(operands_stack.pop());
         debug(stderr, "CALL\tLwrite");
         fprintf(stdout, "%d\n", i32(value));
         operands_stack.push(BOX(0));
         break;
       }
-      case 2: {
+      case Call::LLENGTH: {
         debug(stderr, "CALL\tLlength");
         int value = (int)operands_stack.pop();
         char *str = (char *)value;
@@ -765,13 +827,13 @@ void interpret(FILE *f, bytefile *bf) {
         break;
       }
 
-      case 3: {
+      case Call::LSTRING: {
         debug(stderr, "CALL\tLstring");
         operands_stack.push((u32)Lstring(((void *)operands_stack.pop())));
         break;
       }
 
-      case 4: {
+      case Call::BARRAY: {
         i32 n = INT;
         debug(stderr, "CALL\tBarray\t%d", n);
         auto arr = myBarray(n, operands_stack);
