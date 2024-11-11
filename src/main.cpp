@@ -140,7 +140,7 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #define debug(...) fprintf(__VA_ARGS__)
@@ -157,8 +157,9 @@ static void unsupported() {
 #pragma
 struct __attribute__((packed)) bytefile {
   char *stringtab_ptr; /* A pointer to the beginning of the string table */
-  int *public_ptr;     /* A pointer to the beginning of publics table    */
-  char *code_ptr;      /* A pointer to the bytecode itself               */
+  char *last_stringtab_zero;
+  int *public_ptr; /* A pointer to the beginning of publics table    */
+  char *code_ptr;  /* A pointer to the bytecode itself               */
   void *code_end;
   int stringtab_size;   /* The size (in bytes) of the string table        */
   int global_area_size; /* The size (in words) of global area             */
@@ -170,12 +171,9 @@ struct __attribute__((packed)) bytefile {
 char *get_string(bytefile *f, int pos) {
   // validate its is an ok string
   char *ptr = &f->stringtab_ptr[pos];
-  i32 dist = ptr - f->stringtab_ptr;
-  i32 left_in_str_section = f->stringtab_size - dist;
-  i32 len = strlen(ptr);
-  if (len > left_in_str_section) {
-    fprintf(stderr, "Bad string read at %x (string did not terminate)\n",
-            left_in_str_section);
+  if (ptr > f->last_stringtab_zero) {
+    fprintf(stderr, "Bad string read at offset %d (string did not terminate)\n",
+            pos);
     exit(-1);
   }
   return ptr;
@@ -247,7 +245,12 @@ bytefile *read_file(char *fname) {
   file->public_ptr = (int *)file->buffer;
   file->code_ptr = &file->stringtab_ptr[file->stringtab_size];
   file->code_end = (char *)&file->stringtab_size + size;
-
+  for (file->last_stringtab_zero = file->code_ptr - 1;
+       file->last_stringtab_zero > file->stringtab_ptr;
+       --file->last_stringtab_zero) {
+        if (*file->last_stringtab_zero == 0) 
+          break;
+  }
   return file;
 }
 
