@@ -14,13 +14,13 @@ make bench
 Output on my machine:
 ```
 make -C performance
-make[1]: Entering directory '/home/metametamoon/projects/university/vm/lama-vm-make/performance'
+make[1]: Entering directory '/home/metametamoon/university/vm/lama-vm-make/performance'
 Sort
 lamac  Sort.lama
 cat empty | `which time` -f "Sort\t%U" lamac -i Sort.lama
-Sort    4.17
+Sort    4.20
 lamac -b Sort.lama
 `which time` -f "Sort\t%U" ../build/vm-opt Sort.bc
-Sort    1.95
-make[1]: Leaving directory '/home/metametamoon/projects/university/vm/lama-vm-make/performance'
+Sort    0.81
+make[1]: Leaving directory '/home/metametamoon/university/vm/lama-vm-make/performance'
 ```
