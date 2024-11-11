@@ -57,8 +57,11 @@ template <typename T> struct stack {
   }
 
   void push(T value) {
+    if ((void*)data.data() >= (void*)__gc_stack_top) {
+      fprintf(stderr, "error: stack overflow");
+      exit(-1);
+    }
     *(__gc_stack_top--) = value;
-    assert(data.data() < __gc_stack_top);
   }
 
   T pop() {
