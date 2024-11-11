@@ -248,8 +248,8 @@ bytefile *read_file(char *fname) {
   for (file->last_stringtab_zero = file->code_ptr - 1;
        file->last_stringtab_zero > file->stringtab_ptr;
        --file->last_stringtab_zero) {
-        if (*file->last_stringtab_zero == 0) 
-          break;
+    if (*file->last_stringtab_zero == 0)
+      break;
   }
   return file;
 }
@@ -284,19 +284,16 @@ enum class Patt {
 };
 
 static inline u32 patts_match(void *arg, Patt label) {
+#define PATT_CASE(enum_kind, function)                                         \
+  case enum_kind:                                                              \
+    return function(arg);
   switch (label) {
-  case Patt::STR_TAG:
-    return Bstring_tag_patt(arg);
-  case Patt::ARR_TAG:
-    return Barray_tag_patt(arg);
-  case Patt::SEXPR_TAG:
-    return Bsexp_tag_patt(arg);
-  case Patt::BOXED:
-    return Bboxed_patt(arg);
-  case Patt::UNBOXED:
-    return Bunboxed_patt(arg);
-  case Patt::CLOS_TAG:
-    return Bclosure_tag_patt(arg);
+    PATT_CASE(Patt::STR_TAG, Bstring_tag_patt)
+    PATT_CASE(Patt::ARR_TAG, Barray_tag_patt)
+    PATT_CASE(Patt::SEXPR_TAG, Bsexp_tag_patt)
+    PATT_CASE(Patt::BOXED, Bboxed_patt)
+    PATT_CASE(Patt::UNBOXED, Bunboxed_patt)
+    PATT_CASE(Patt::CLOS_TAG, Bclosure_tag_patt)
   default:
     fprintf(stderr, "bad patt specializer: %d\n", (i32)label);
     unsupported();
@@ -305,33 +302,23 @@ static inline u32 patts_match(void *arg, Patt label) {
 }
 
 static inline i32 arithm_op(i32 l, i32 r, BinopLabel label) {
+#define BINOP_CASE(enum_kind, binop)                                           \
+  case enum_kind:                                                              \
+    return l binop r;
   switch (label) {
-  case BinopLabel::ADD:
-    return l + r;
-  case BinopLabel::SUB:
-    return l - r;
-  case BinopLabel::MUL:
-    return l * r;
-  case BinopLabel::DIV:
-    return l / r;
-  case BinopLabel::MOD:
-    return l % r;
-  case BinopLabel::LT:
-    return l < r;
-  case BinopLabel::LEQ:
-    return l <= r;
-  case BinopLabel::GT:
-    return l > r;
-  case BinopLabel::GEQ:
-    return l >= r;
-  case BinopLabel::EQ:
-    return l == r;
-  case BinopLabel::NEQ:
-    return l != r;
-  case BinopLabel::AND:
-    return l && r;
-  case BinopLabel::OR:
-    return l || r;
+    BINOP_CASE(BinopLabel::ADD, +)
+    BINOP_CASE(BinopLabel::SUB, -)
+    BINOP_CASE(BinopLabel::MUL, *)
+    BINOP_CASE(BinopLabel::DIV, /)
+    BINOP_CASE(BinopLabel::MOD, %)
+    BINOP_CASE(BinopLabel::LT, <)
+    BINOP_CASE(BinopLabel::LEQ, <=)
+    BINOP_CASE(BinopLabel::GT, >)
+    BINOP_CASE(BinopLabel::GEQ, >=)
+    BINOP_CASE(BinopLabel::EQ, ==)
+    BINOP_CASE(BinopLabel::NEQ, !=)
+    BINOP_CASE(BinopLabel::AND, &&)
+    BINOP_CASE(BinopLabel::OR, ||)
   default:
     fprintf(stderr, "unsupported op label: %d", (i32)label);
     exit(-1);
