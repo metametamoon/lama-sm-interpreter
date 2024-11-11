@@ -1,5 +1,6 @@
 /* Lama SM Bytecode interpreter */
 
+#include "runtime/runtime_common.h"
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -10,7 +11,6 @@
 #include <malloc.h>
 #include <stdio.h>
 #include <string.h>
-#include "runtime/runtime_common.h"
 
 extern "C" void *Belem(void *p, int i);
 extern "C" void *Bsta(void *v, int i, void *x);
@@ -57,7 +57,7 @@ template <typename T> struct stack {
   }
 
   void push(T value) {
-    if ((void*)data.data() >= (void*)__gc_stack_top) {
+    if ((void *)data.data() >= (void *)__gc_stack_top) {
       fprintf(stderr, "error: stack overflow");
       exit(-1);
     }
@@ -140,7 +140,7 @@ void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
 void *__start_custom_data;
 void *__stop_custom_data;
 
-// #define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define debug(...) fprintf(__VA_ARGS__)
@@ -156,9 +156,10 @@ static void unsupported() {
 /* The unpacked representation of bytecode file */
 #pragma
 struct __attribute__((packed)) bytefile {
-  char *string_ptr;     /* A pointer to the beginning of the string table */
-  int *public_ptr;      /* A pointer to the beginning of publics table    */
-  char *code_ptr;       /* A pointer to the bytecode itself               */
+  char *stringtab_ptr; /* A pointer to the beginning of the string table */
+  int *public_ptr;     /* A pointer to the beginning of publics table    */
+  char *code_ptr;      /* A pointer to the bytecode itself               */
+  void *code_end;
   int stringtab_size;   /* The size (in bytes) of the string table        */
   int global_area_size; /* The size (in words) of global area             */
   int public_symbols_number; /* The number of public symbols */
@@ -168,8 +169,8 @@ struct __attribute__((packed)) bytefile {
 /* Gets a string from a string table by an index */
 char *get_string(bytefile *f, int pos) {
   // validate its is an ok string
-  char *ptr = &f->string_ptr[pos];
-  i32 dist = ptr - f->string_ptr;
+  char *ptr = &f->stringtab_ptr[pos];
+  i32 dist = ptr - f->stringtab_ptr;
   i32 left_in_str_section = f->stringtab_size - dist;
   i32 len = strlen(ptr);
   if (len > left_in_str_section) {
@@ -241,10 +242,11 @@ bytefile *read_file(char *fname) {
 
   fclose(f);
 
-  file->string_ptr =
+  file->stringtab_ptr =
       &file->buffer[file->public_symbols_number * 2 * sizeof(int)];
   file->public_ptr = (int *)file->buffer;
-  file->code_ptr = &file->string_ptr[file->stringtab_size];
+  file->code_ptr = &file->stringtab_ptr[file->stringtab_size];
+  file->code_end = (char *)&file->stringtab_size + size;
 
   return file;
 }
@@ -334,6 +336,14 @@ static inline i32 arithm_op(i32 l, i32 r, BinopLabel label) {
   }
 }
 
+bool check_address(bytefile *f, char *addr) {
+  return (f->code_ptr <= addr) && (addr < f->code_end);
+}
+
+void print_location(bytefile *bf, char *next_ip) {
+  fprintf(stderr, "at 0x%.8x:\n", unsigned((next_ip - 4) - bf->code_ptr - 1));
+}
+
 /* Disassembles the bytecode pool */
 void interpret(FILE *f, bytefile *bf) {
 #define INT (ip += sizeof(int), *(int *)(ip - sizeof(int)))
@@ -383,8 +393,17 @@ void interpret(FILE *f, bytefile *bf) {
   };
   __init();
   bool in_closure = false;
+  auto check_is_begin = [](char *ip) {
+    unsigned char x = *ip;
+    unsigned char h = (x & 0xF0) >> 4, l = x & 0x0F;
+    return h == 5 && (l == 3 || l == 2);
+  };
 
   do {
+    if (ip > bf->code_end) {
+      fprintf(stderr, "execution unexpectedly got out of code section\n");
+      exit(-1);
+    }
     unsigned char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
@@ -452,7 +471,14 @@ void interpret(FILE *f, bytefile *bf) {
       case 5: {
         auto jump_location = INT;
         debug(stderr, "JMP\t0x%.8x", jump_location);
+        char *old_ip = ip;
         ip = bf->code_ptr + jump_location;
+        if (!check_address(bf, ip)) {
+          print_location(bf, old_ip);
+          fprintf(stderr, "trying to jump out of the code area to offset %d",
+                  ip - bf->code_ptr);
+        }
+
         break;
       }
 
@@ -551,7 +577,13 @@ void interpret(FILE *f, bytefile *bf) {
         debug(stderr, "CJMPz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
         if (top == 0) {
+          char *old_ip = ip;
           ip = bf->code_ptr + jump_location;
+          if (!check_address(bf, ip)) {
+            print_location(bf, old_ip);
+            fprintf(stderr, "trying to jump out of the code area to offset %d",
+                    ip - bf->code_ptr);
+          }
         }
         break;
       }
@@ -561,7 +593,13 @@ void interpret(FILE *f, bytefile *bf) {
         debug(stderr, "CJMPnz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
         if (top != 0) {
+          char *old_ip = ip;
           ip = bf->code_ptr + jump_location;
+          if (!check_address(bf, ip)) {
+            print_location(bf, old_ip);
+            fprintf(stderr, "trying to jump out of the code area to offset %d",
+                    ip - bf->code_ptr);
+          }
         }
         break;
       }
@@ -580,13 +618,23 @@ void interpret(FILE *f, bytefile *bf) {
         operands_stack.n_args = n_args;
         operands_stack.base_pointer = __gc_stack_top + 1;
         __gc_stack_top -= (n_locals + 1);
-        memset((void*)__gc_stack_top, 0, (n_locals + 1) * sizeof(size_t));
+        memset((void *)__gc_stack_top, 0, (n_locals + 1) * sizeof(size_t));
         break;
       }
 
       case 4: {
         int addr = INT;
         debug(stderr, "CLOSURE\t0x%.8x", addr);
+        if (addr < 0 || addr > ((char *)bf->code_end - bf->code_ptr)) {
+          print_location(bf, ip);
+          fprintf(stderr, "closure points outside of the code area\n");
+          exit(-1);
+        }
+        if (!check_is_begin(bf->code_ptr + addr)) {
+          print_location(bf, ip);
+          fprintf(stderr, "closure does not point at begin\n");
+          exit(-1);
+        }
         int n = INT;
         for (int i = 0; i < n; i++) {
           switch (BYTE) {
@@ -642,6 +690,11 @@ void interpret(FILE *f, bytefile *bf) {
         debug(stderr, "CALL\t0x%.8x ", loc);
         debug(stderr, "%d", n);
         operands_stack.push(u32(ip));
+        if (!check_is_begin(bf->code_ptr + loc)) {
+          print_location(bf, ip);
+          fprintf(stderr, "CALL does not call a function\n");
+          exit(-1);
+        }
         ip = bf->code_ptr + loc;
         break;
       }
