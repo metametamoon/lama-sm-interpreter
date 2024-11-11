@@ -162,7 +162,7 @@ struct __attribute__((packed)) bytefile {
   int stringtab_size;   /* The size (in bytes) of the string table        */
   int global_area_size; /* The size (in words) of global area             */
   int public_symbols_number; /* The number of public symbols */
-  char buffer[100];
+  char buffer[0];
 };
 
 /* Gets a string from a string table by an index */
@@ -385,7 +385,7 @@ void interpret(FILE *f, bytefile *bf) {
   bool in_closure = false;
 
   do {
-    char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
+    unsigned char x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch (h) {
     case 15:
