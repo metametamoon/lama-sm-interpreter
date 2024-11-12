@@ -3,6 +3,7 @@
 #include "runtime/runtime_common.h"
 #include <array>
 #include <cassert>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -41,6 +42,16 @@ using i32 = int32_t;
 static i32 constexpr N_GLOBAL = 100;
 static i32 constexpr STACK_SIZE = 100000;
 
+void error(const char *format, ...) {
+  fprintf(stderr, "error: ");
+  va_list argptr;
+  va_start(argptr, format);
+  vfprintf(stderr, format, argptr);
+  fprintf(stderr, "\n");
+  exit(-1);
+  va_end(argptr);
+}
+
 // stored on the stack (see std::array)
 template <typename T> struct stack {
   std::array<T, STACK_SIZE> data; // zero-initialized on the stack
@@ -58,16 +69,14 @@ template <typename T> struct stack {
 
   void push(T value) {
     if ((void *)data.data() >= (void *)__gc_stack_top) {
-      fprintf(stderr, "error: stack overflow");
-      exit(-1);
+      error("error: stack overflow");
     }
     *(__gc_stack_top--) = value;
   }
 
   T pop() {
     if (__gc_stack_top == stack_begin) {
-      fprintf(stderr, "negative stack\n");
-      exit(-1);
+      error("negative stack\n");
     }
     return *(++__gc_stack_top);
   }
@@ -148,11 +157,6 @@ void *__stop_custom_data;
 #define debug(...)
 #endif
 
-static void unsupported() {
-  fprintf(stderr, "unsupported");
-  exit(-1);
-}
-
 /* The unpacked representation of bytecode file */
 #pragma
 struct __attribute__((packed)) bytefile {
@@ -200,42 +204,35 @@ bytefile *read_file(char *fname) {
   bytefile *file;
 
   if (f == nullptr) {
-    printf("%s\n", strerror(errno));
-    exit(-1);
+    error("%s\n", strerror(errno));
   }
 
   if (fseek(f, 0, SEEK_END) == -1) {
-    printf("%s\n", strerror(errno));
-    exit(-1);
+    error("%s\n", strerror(errno));
   }
   size = ftell(f);
 
   file = (bytefile *)malloc(sizeof(int) * 4 + size + 100);
 
   if (file == nullptr) {
-    printf("*** FAILURE: unable to allocate memory.\n");
-    exit(-1);
+    error("*** FAILURE: unable to allocate memory.\n");
   }
 
   rewind(f);
 
   if (size != fread(&file->stringtab_size, 1, size, f)) {
-    printf("%s\n", strerror(errno));
-    exit(-1);
+    error("%s\n", strerror(errno));
   }
 
   if (file->public_symbols_number < 0) {
-    fprintf(stderr, "unreasonable number of public symbols (an error?): %d\n",
-            file->public_symbols_number);
-    exit(-1);
+    error("unreasonable number of public symbols (an error?): %d\n",
+          file->public_symbols_number);
   } else if (file->stringtab_size < 0) {
-    fprintf(stderr, "unreasonable size of stringtab (an error?): %d\n",
-            file->public_symbols_number);
-    exit(-1);
+    error("unreasonable size of stringtab (an error?): %d\n",
+          file->public_symbols_number);
   } else if (file->global_area_size < 0) {
-    fprintf(stderr, "unreasonable size of global aread (an error?): %d\n",
-            file->public_symbols_number);
-    exit(-1);
+    error("unreasonable size of global aread (an error?): %d\n",
+          file->public_symbols_number);
   }
 
   fclose(f);
@@ -295,8 +292,7 @@ static inline u32 patts_match(void *arg, Patt label) {
     PATT_CASE(Patt::UNBOXED, Bunboxed_patt)
     PATT_CASE(Patt::CLOS_TAG, Bclosure_tag_patt)
   default:
-    fprintf(stderr, "bad patt specializer: %d\n", (i32)label);
-    unsupported();
+    error("bad patt specializer: %d\n", (i32)label);
     return 0;
   }
 }
@@ -320,8 +316,7 @@ static inline i32 arithm_op(i32 l, i32 r, BinopLabel label) {
     BINOP_CASE(BinopLabel::AND, &&)
     BINOP_CASE(BinopLabel::OR, ||)
   default:
-    fprintf(stderr, "unsupported op label: %d", (i32)label);
-    exit(-1);
+    error("unsupported op label: %d", (i32)label);
     return -1;
   }
 }
@@ -386,7 +381,6 @@ enum class Misc2LCode : u8 {
   ELEM = 11,
 };
 
-
 enum class Call : u8 {
   READ = 0,
   WRITE = 1,
@@ -394,6 +388,17 @@ enum class Call : u8 {
   LSTRING = 3,
   BARRAY = 4,
 };
+
+void located_error(bytefile *bf, char *next_ip, const char *format, ...) {
+  fprintf(stderr, "error\n");
+  print_location(bf, next_ip);
+  va_list argptr;
+  va_start(argptr, format);
+  vfprintf(stderr, format, argptr);
+  fprintf(stderr, "\n");
+  exit(-1);
+  va_end(argptr);
+}
 
 /* Disassembles the bytecode pool */
 void interpret(FILE *f, bytefile *bf) {
@@ -435,7 +440,7 @@ void interpret(FILE *f, bytefile *bf) {
       u32 *closure = (u32 *)*closure_ptr;
       return (u32)&closure[1 + index];
     } else {
-      unsupported();
+      error("unsupported reference kind");
       return 0;
     }
   };
@@ -452,8 +457,7 @@ void interpret(FILE *f, bytefile *bf) {
 
   do {
     if (ip > bf->code_end) {
-      fprintf(stderr, "execution unexpectedly got out of code section\n");
-      exit(-1);
+      error("execution unexpectedly got out of code section\n");
     }
     u8 x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
@@ -678,14 +682,10 @@ void interpret(FILE *f, bytefile *bf) {
         int addr = INT;
         debug(stderr, "CLOSURE\t0x%.8x", addr);
         if (addr < 0 || addr > ((char *)bf->code_end - bf->code_ptr)) {
-          print_location(bf, ip);
-          fprintf(stderr, "closure points outside of the code area\n");
-          exit(-1);
+          located_error(bf, ip, "closure points outside of the code area\n");
         }
         if (!check_is_begin(bf->code_ptr + addr)) {
-          print_location(bf, ip);
-          fprintf(stderr, "closure does not point at begin\n");
-          exit(-1);
+          located_error(bf, ip, "closure does not point at begin\n");
         }
         int n = INT;
         for (int i = 0; i < n; i++) {
@@ -743,9 +743,8 @@ void interpret(FILE *f, bytefile *bf) {
         debug(stderr, "%d", n);
         operands_stack.push(u32(ip));
         if (!check_is_begin(bf->code_ptr + loc)) {
-          print_location(bf, ip);
-          fprintf(stderr, "CALL does not call a function\n");
-          exit(-1);
+          located_error(bf, ip, "CALL does not call a function\n");
+          ;
         }
         ip = bf->code_ptr + loc;
         break;
