@@ -406,9 +406,6 @@ static inline void located_error(bytefile const *bf, char *next_ip,
 
 /* Disassembles the bytecode pool */
 static inline void interpret(FILE *f, bytefile const *bf) {
-#define INT (ip += sizeof(int), *(int *)(ip - sizeof(int)))
-#define BYTE *ip++
-#define STRING get_string(bf, INT)
 #define FAIL                                                                   \
   {                                                                            \
     printf("ERROR: invalid opcode %d-%d\n", h, l);                             \
@@ -416,6 +413,22 @@ static inline void interpret(FILE *f, bytefile const *bf) {
   }
 
   char *ip = bf->code_ptr;
+  auto read_int = [&ip, &bf]() {
+    check_address(bf, ip);
+    ip += sizeof(int);
+    return *(int *)(ip - sizeof(int));
+  };
+
+  auto read_byte = [&ip, &bf]() {
+    check_address(bf, ip);
+    return *ip++;
+  };
+
+  auto read_string = [&read_int, &ip, &bf]() {
+    check_address(bf, ip);
+    return get_string(bf, read_int());
+  };
+
   static char const *const ops[] = {
       "+", "-", "*", "/", "%", "<", "<=", ">", ">=", "==", "!=", "&&", "!!"};
   static char const *const pats[] = {"=str", "#string", "#array", "#sexp",
@@ -463,17 +476,20 @@ static inline void interpret(FILE *f, bytefile const *bf) {
   };
   __init();
   bool in_closure = false;
-  auto check_is_begin = [](char *ip) {
+  auto check_is_begin = [](bytefile const *bf, char *ip) {
+    if (!check_address(bf, ip)) {
+      return false;
+    }
     u8 x = *ip;
     u8 h = (x & 0xF0) >> 4, l = x & 0x0F;
     return h == 5 && (l == 3 || l == 2);
   };
 
   do {
-    if (ip > bf->code_end) {
+    if (ip >= bf->code_end) {
       error("execution unexpectedly got out of code section\n");
     }
-    u8 x = BYTE, h = (x & 0xF0) >> 4, l = x & 0x0F;
+    u8 x = read_byte(), h = (x & 0xF0) >> 4, l = x & 0x0F;
     debug(stderr, "0x%.8x:\t", unsigned(ip - bf->code_ptr - 1));
     switch ((HCode)h) {
     case HCode::STOP:
@@ -495,14 +511,14 @@ static inline void interpret(FILE *f, bytefile const *bf) {
     case HCode::MISC1: {
       switch ((Misc1LCode)l) {
       case Misc1LCode::CONST: {
-        auto arg = INT;
+        auto arg = read_int();
         operands_stack.push(BOX(arg));
         debug(stderr, "CONST\t%d", arg);
         break;
       }
 
       case Misc1LCode::STR: {
-        char const *string = STRING;
+        char const *string = read_string();
         debug(stderr, "STRING\t%s", string);
         char *obj_string = (char *)Bstring((void *)string);
         operands_stack.push(u32(obj_string));
@@ -510,8 +526,8 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc1LCode::SEXP: {
-        char const *tag = STRING;
-        int n = INT;
+        char const *tag = read_string();
+        int n = read_int();
         debug(stderr, "SEXP\t%s ", tag);
         debug(stderr, "%d", n);
         auto value = myBsexp(n, operands_stack, tag);
@@ -538,7 +554,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc1LCode::JMP: {
-        auto jump_location = INT;
+        auto jump_location = read_int();
         debug(stderr, "JMP\t0x%.8x", jump_location);
         char *old_ip = ip;
         ip = bf->code_ptr + jump_location;
@@ -616,7 +632,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
     }
     case HCode::LD: { // LD
       debug(stderr, "%s\t", lds[h - 2]);
-      i32 const index = INT;
+      i32 const index = read_int();
       u32 kind = l + 1;
       auto value = *(u32 *)create_reference(index, kind, ip);
       operands_stack.push(value);
@@ -624,7 +640,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
     }
     case HCode::LDA: {
       debug(stderr, "%s\t", lds[h - 2]);
-      i32 index = INT;
+      i32 index = read_int();
       u32 kind = l + 1;
       auto ref = create_reference(index, kind, ip);
       operands_stack.push(ref);
@@ -633,7 +649,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
     }
     case HCode::ST: { // ST
       debug(stderr, "%s\t", lds[h - 2]);
-      i32 index = INT;
+      i32 index = read_int();
       u32 kind = l + 1;
       auto top = operands_stack.top();
       write_reference(create_reference(index, kind, ip), top);
@@ -643,7 +659,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
     case HCode::MISC2: {
       switch ((Misc2LCode)l) {
       case Misc2LCode::CJMPZ: {
-        auto jump_location = INT;
+        auto jump_location = read_int();
         debug(stderr, "CJMPz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
         if (top == 0) {
@@ -659,7 +675,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc2LCode::CJMPNZ: {
-        auto jump_location = INT;
+        auto jump_location = read_int();
         debug(stderr, "CJMPnz\t0x%.8x", jump_location);
         auto top = UNBOX(operands_stack.pop());
         if (top != 0) {
@@ -676,8 +692,8 @@ static inline void interpret(FILE *f, bytefile const *bf) {
 
       case Misc2LCode::BEGIN:
       case Misc2LCode::CBEGIN: {
-        int n_args = INT;
-        int n_locals = INT;
+        int n_args = read_int();
+        int n_locals = read_int();
         if (l == 3) {
           debug(stderr, "C");
         }
@@ -693,40 +709,40 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc2LCode::CLOSURE: {
-        int addr = INT;
+        int addr = read_int();
         debug(stderr, "CLOSURE\t0x%.8x", addr);
         if (addr < 0 || addr > ((char *)bf->code_end - bf->code_ptr)) {
           located_error(bf, ip, "closure points outside of the code area\n");
         }
-        if (!check_is_begin(bf->code_ptr + addr)) {
+        if (!check_is_begin(bf, bf->code_ptr + addr)) {
           located_error(bf, ip, "closure does not point at begin\n");
         }
-        int n = INT;
+        int n = read_int();
         for (int i = 0; i < n; i++) {
-          switch (BYTE) {
+          switch (read_byte()) {
           case 0: {
-            int index = INT;
+            int index = read_int();
             debug(stderr, "G(%d)", index);
             operands_stack.push((u32) *
                                 (u32 *)create_reference(index, GLOBAL, ip));
             break;
           }
           case 1: {
-            int index = INT;
+            int index = read_int();
             debug(stderr, "L(%d)", index);
             operands_stack.push((u32) *
                                 (u32 *)create_reference(index, LOCAL, ip));
             break;
           }
           case 2: {
-            int index = INT;
+            int index = read_int();
             debug(stderr, "A(%d)", index);
             operands_stack.push(
                 (u32)(*((u32 *)create_reference(index, ARG, ip))));
             break;
           }
           case 3: {
-            int index = INT;
+            int index = read_int();
             debug(stderr, "C(%d)", index);
             operands_stack.push(
                 (u32)(*((u32 *)create_reference(index, CAPTURED, ip))));
@@ -742,7 +758,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       };
 
       case Misc2LCode::CALLC: {
-        int n_arg = INT;
+        int n_arg = read_int();
         debug(stderr, "CALLC\t%d", n_arg);
         // if (n_arg == 0) {
         u32 closure = *(__gc_stack_top + 1 + n_arg);
@@ -754,12 +770,12 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc2LCode::CALL: {
-        int loc = INT;
-        int n = INT;
+        int loc = read_int();
+        int n = read_int();
         debug(stderr, "CALL\t0x%.8x ", loc);
         debug(stderr, "%d", n);
         operands_stack.push(u32(ip));
-        if (!check_is_begin(bf->code_ptr + loc)) {
+        if (!check_is_begin(bf, bf->code_ptr + loc)) {
           located_error(bf, ip, "CALL does not call a function\n");
           ;
         }
@@ -768,8 +784,8 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc2LCode::TAG: {
-        const char *name = STRING;
-        int n = INT;
+        const char *name = read_string();
+        int n = read_int();
         debug(stderr, "TAG\t%s ", name);
         debug(stderr, "%d", n);
         u32 v =
@@ -779,7 +795,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc2LCode::ARRAY: {
-        int size = INT;
+        int size = read_int();
         debug(stderr, "ARRAY\t%d", size);
         size_t is_array_n =
             (size_t)Barray_patt((void *)operands_stack.pop(), BOX(size));
@@ -788,13 +804,13 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Misc2LCode::FAILURE:
-        fprintf(f, "FAIL\t%d", INT);
-        fprintf(f, "%d", INT);
+        fprintf(f, "FAIL\t%d", read_int());
+        fprintf(f, "%d", read_int());
         exit(-1);
         break;
 
       case Misc2LCode::LINE: {
-        int line = INT;
+        int line = read_int();
         debug(stderr, "LINE\t%d", line);
         break;
       }
@@ -850,7 +866,7 @@ static inline void interpret(FILE *f, bytefile const *bf) {
       }
 
       case Call::BARRAY: {
-        i32 n = INT;
+        i32 n = read_int();
         debug(stderr, "CALL\tBarray\t%d", n);
         auto arr = myBarray(n, operands_stack);
         operands_stack.push(u32(arr));
