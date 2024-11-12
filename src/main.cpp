@@ -39,10 +39,10 @@ using i32 = int32_t;
 
 #define BOXED(x) (((u32)(x)) & 0x0001)
 
-static i32 constexpr N_GLOBAL = 100;
+static i32 constexpr N_GLOBAL = 1000;
 static i32 constexpr STACK_SIZE = 100000;
 
-void error(const char *format, ...) {
+static inline void error(char const *format, ...) {
   fprintf(stderr, "error: ");
   va_list argptr;
   va_start(argptr, format);
@@ -100,7 +100,7 @@ template <typename T> struct stack {
   }
 };
 
-void *myBarray(int n, stack<u32> &ops_stack) {
+static inline void *myBarray(int n, stack<u32> &ops_stack) {
   data *r = (data *)alloc_array(n);
   for (i32 i = n - 1; i >= 0; --i) {
     i32 elem = ops_stack.pop();
@@ -111,7 +111,7 @@ void *myBarray(int n, stack<u32> &ops_stack) {
 
 extern "C" void *alloc_sexp(int members);
 extern "C" int LtagHash(char *);
-void *myBsexp(int n, stack<u32> &ops_stack, char *name) {
+static inline void *myBsexp(int n, stack<u32> &ops_stack, char const *name) {
   va_list args;
   int i;
   int ai;
@@ -126,13 +126,14 @@ void *myBsexp(int n, stack<u32> &ops_stack, char *name) {
     ((int *)r->contents)[i] = ai;
   }
 
-  ((sexp *)r)->tag = UNBOX(LtagHash(name));
+  ((sexp *)r)->tag =
+      UNBOX(LtagHash((char *)name)); // cast for runtime compatibility
 
   return (int *)r->contents;
 }
 
 extern "C" void *alloc_closure(int);
-void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
+static inline void *myBclosure(int n, stack<u32> &ops_stack, void *addr) {
   int i, ai;
   data *r;
   r = (data *)alloc_closure(n + 1);
@@ -172,7 +173,7 @@ struct __attribute__((packed)) bytefile {
 };
 
 /* Gets a string from a string table by an index */
-char *get_string(bytefile *f, int pos) {
+static inline char const *get_string(bytefile const *f, int pos) {
   // validate its is an ok string
   char *ptr = &f->stringtab_ptr[pos];
   if (ptr > f->last_stringtab_zero) {
@@ -184,12 +185,12 @@ char *get_string(bytefile *f, int pos) {
 }
 
 /* Gets a name for a public symbol */
-char *get_public_name(bytefile *f, int i) {
+static inline char const *get_public_name(bytefile *f, int i) {
   return get_string(f, f->public_ptr[i * 2]);
 }
 
 /* Gets an offset for a publie symbol */
-int get_public_offset(bytefile *f, int i) {
+static inline int get_public_offset(bytefile *f, int i) {
   if (!(i < f->public_symbols_number)) {
     fprintf(stderr, "Trying to read out of bounds public member at %d", i);
     exit(-1);
@@ -198,7 +199,7 @@ int get_public_offset(bytefile *f, int i) {
 }
 
 /* Reads a binary bytecode file by name and unpacks it */
-bytefile *read_file(char *fname) {
+static inline bytefile const *read_file(char *fname) {
   FILE *f = fopen(fname, "rb");
   long size;
   bytefile *file;
@@ -227,10 +228,12 @@ bytefile *read_file(char *fname) {
   if (file->public_symbols_number < 0) {
     error("unreasonable number of public symbols (an error?): %d\n",
           file->public_symbols_number);
-  } else if (file->stringtab_size < 0) {
+  }
+  if (file->stringtab_size < 0) {
     error("unreasonable size of stringtab (an error?): %d\n",
           file->public_symbols_number);
-  } else if (file->global_area_size < 0) {
+  }
+  if (file->global_area_size < 0) {
     error("unreasonable size of global aread (an error?): %d\n",
           file->public_symbols_number);
   }
@@ -321,11 +324,11 @@ static inline i32 arithm_op(i32 l, i32 r, BinopLabel label) {
   }
 }
 
-bool check_address(bytefile *f, char *addr) {
+static inline bool check_address(bytefile const *f, char *addr) {
   return (f->code_ptr <= addr) && (addr < f->code_end);
 }
 
-void print_location(bytefile *bf, char *next_ip) {
+static inline void print_location(bytefile const *bf, char *next_ip) {
   fprintf(stderr, "at 0x%.8x:\n", unsigned((next_ip - 4) - bf->code_ptr - 1));
 }
 
@@ -389,7 +392,8 @@ enum class Call : u8 {
   BARRAY = 4,
 };
 
-void located_error(bytefile *bf, char *next_ip, const char *format, ...) {
+static inline void located_error(bytefile const *bf, char *next_ip,
+                                 const char *format, ...) {
   fprintf(stderr, "error\n");
   print_location(bf, next_ip);
   va_list argptr;
@@ -401,7 +405,7 @@ void located_error(bytefile *bf, char *next_ip, const char *format, ...) {
 }
 
 /* Disassembles the bytecode pool */
-void interpret(FILE *f, bytefile *bf) {
+static inline void interpret(FILE *f, bytefile const *bf) {
 #define INT (ip += sizeof(int), *(int *)(ip - sizeof(int)))
 #define BYTE *ip++
 #define STRING get_string(bf, INT)
@@ -425,23 +429,33 @@ void interpret(FILE *f, bytefile *bf) {
   u32 const LOCAL = 2;
   u32 const ARG = 3;
   u32 const CAPTURED = 4;
-  auto create_reference = [&](u32 index, u32 kind) -> u32 {
-    if (kind == GLOBAL) {
+  auto create_reference = [&](u32 index, u32 kind, char *next_ip) -> u32 {
+    switch (kind) {
+    case GLOBAL: {
+      if (index > N_GLOBAL) {
+        located_error(bf, next_ip, "indexing global at %d > N_GLOBALS(%d)",
+                      index, N_GLOBAL);
+      }
       return (u32)(operands_stack.stack_begin + 1 + index);
-    } else if (kind == LOCAL) {
+    }
+    case LOCAL: {
       return (u32)(operands_stack.base_pointer - 1 - index);
-    } else if (kind == ARG) {
+    }
+    case ARG: {
       auto result =
           operands_stack.base_pointer + 2 + operands_stack.n_args - index;
       return (u32)result;
-    } else if (kind == CAPTURED) {
+    }
+    case CAPTURED: {
       auto closure_ptr =
           operands_stack.base_pointer + 2 + operands_stack.n_args + 1;
       u32 *closure = (u32 *)*closure_ptr;
       return (u32)&closure[1 + index];
-    } else {
+    }
+    default: {
       error("unsupported reference kind");
       return 0;
+    }
     }
   };
   auto write_reference = [&](u32 reference, u32 value) -> void {
@@ -488,7 +502,7 @@ void interpret(FILE *f, bytefile *bf) {
       }
 
       case Misc1LCode::STR: {
-        char *string = STRING;
+        char const *string = STRING;
         debug(stderr, "STRING\t%s", string);
         char *obj_string = (char *)Bstring((void *)string);
         operands_stack.push(u32(obj_string));
@@ -496,7 +510,7 @@ void interpret(FILE *f, bytefile *bf) {
       }
 
       case Misc1LCode::SEXP: {
-        char *tag = STRING;
+        char const *tag = STRING;
         int n = INT;
         debug(stderr, "SEXP\t%s ", tag);
         debug(stderr, "%d", n);
@@ -604,7 +618,7 @@ void interpret(FILE *f, bytefile *bf) {
       debug(stderr, "%s\t", lds[h - 2]);
       i32 const index = INT;
       u32 kind = l + 1;
-      auto value = *(u32 *)create_reference(index, kind);
+      auto value = *(u32 *)create_reference(index, kind, ip);
       operands_stack.push(value);
       break;
     }
@@ -612,7 +626,7 @@ void interpret(FILE *f, bytefile *bf) {
       debug(stderr, "%s\t", lds[h - 2]);
       i32 index = INT;
       u32 kind = l + 1;
-      auto ref = create_reference(index, kind);
+      auto ref = create_reference(index, kind, ip);
       operands_stack.push(ref);
       operands_stack.push(ref);
       break;
@@ -622,7 +636,7 @@ void interpret(FILE *f, bytefile *bf) {
       i32 index = INT;
       u32 kind = l + 1;
       auto top = operands_stack.top();
-      write_reference(create_reference(index, kind), top);
+      write_reference(create_reference(index, kind, ip), top);
       break;
     }
 
@@ -693,26 +707,29 @@ void interpret(FILE *f, bytefile *bf) {
           case 0: {
             int index = INT;
             debug(stderr, "G(%d)", index);
-            operands_stack.push((u32) * (u32 *)create_reference(index, GLOBAL));
+            operands_stack.push((u32) *
+                                (u32 *)create_reference(index, GLOBAL, ip));
             break;
           }
           case 1: {
             int index = INT;
             debug(stderr, "L(%d)", index);
-            operands_stack.push((u32) * (u32 *)create_reference(index, LOCAL));
+            operands_stack.push((u32) *
+                                (u32 *)create_reference(index, LOCAL, ip));
             break;
           }
           case 2: {
             int index = INT;
             debug(stderr, "A(%d)", index);
-            operands_stack.push((u32)(*((u32 *)create_reference(index, ARG))));
+            operands_stack.push(
+                (u32)(*((u32 *)create_reference(index, ARG, ip))));
             break;
           }
           case 3: {
             int index = INT;
             debug(stderr, "C(%d)", index);
             operands_stack.push(
-                (u32)(*((u32 *)create_reference(index, CAPTURED))));
+                (u32)(*((u32 *)create_reference(index, CAPTURED, ip))));
             break;
           }
           default:
@@ -856,7 +873,7 @@ stop:
 }
 
 /* Dumps the contents of the file */
-void dump_file(FILE *f, bytefile *bf) {
+static inline void dump_file(FILE *f, bytefile const *bf) {
   int i;
 
   debug(stderr, "String table size       : %d\n", bf->stringtab_size);
@@ -873,7 +890,7 @@ void dump_file(FILE *f, bytefile *bf) {
 }
 
 int main(int argc, char *argv[]) {
-  bytefile *f = read_file(argv[1]);
+  bytefile const *f = read_file(argv[1]);
   dump_file(stdout, f);
   return 0;
 }
