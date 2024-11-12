@@ -18,9 +18,9 @@ make[1]: Entering directory '/home/metametamoon/university/vm/lama-vm-make/perfo
 Sort
 lamac  Sort.lama
 cat empty | `which time` -f "Sort\t%U" lamac -i Sort.lama
-Sort    4.20
+Sort    3.76
 lamac -b Sort.lama
 `which time` -f "Sort\t%U" ../build/vm-opt Sort.bc
-Sort    0.81
+Sort    0.86
 make[1]: Leaving directory '/home/metametamoon/university/vm/lama-vm-make/performance'
 ```
