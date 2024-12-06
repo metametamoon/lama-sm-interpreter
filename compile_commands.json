@@ -1,0 +1,22 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-m32",
+      "-g",
+      "-g2",
+      "-fstack-protector-all",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wno-unused-parameter",
+      "-c",
+      "-o",
+      "build/main.o",
+      "src/main.cpp"
+    ],
+    "directory": "/home/metametamoon/university/vm/lama-vm-make",
+    "file": "/home/metametamoon/university/vm/lama-vm-make/src/main.cpp",
+    "output": "/home/metametamoon/university/vm/lama-vm-make/build/main.o"
+  }
+]
